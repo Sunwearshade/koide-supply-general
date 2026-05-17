@@ -58,7 +58,10 @@ async function getProductFlow(period = 'weekly') {
      INNER JOIN inventario i ON i.id_refaccion = m.id_refaccion
      WHERE m.fecha >= DATE_SUB(NOW(), INTERVAL :days DAY)
      GROUP BY i.id_refaccion, i.descripcion, i.no_parte
-     ORDER BY (entradas + salidas) DESC, i.descripcion ASC`,
+     ORDER BY (
+       SUM(CASE WHEN m.tipo = 'entrada' THEN m.cantidad ELSE 0 END) +
+       SUM(CASE WHEN m.tipo = 'salida' THEN m.cantidad ELSE 0 END)
+     ) DESC, i.descripcion ASC`,
     { days }
   );
 

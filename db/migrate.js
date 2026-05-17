@@ -76,6 +76,32 @@ async function migrate() {
     await addColumnIfMissing(connection, 'ordenes', 'maquina', 'varchar(100) DEFAULT NULL');
     await addColumnIfMissing(connection, 'ordenes', 'numero_empleado', 'varchar(50) DEFAULT NULL');
 
+    await addColumnIfMissing(connection, 'inventario', 'estado_revision', "enum('pendiente','aprobado','rechazado') DEFAULT 'aprobado'");
+    await addColumnIfMissing(connection, 'inventario', 'id_solicitante_alta', 'int DEFAULT NULL');
+    await addColumnIfMissing(connection, 'inventario', 'id_aprobador_alta', 'int DEFAULT NULL');
+    await addColumnIfMissing(connection, 'inventario', 'fecha_revision', 'datetime DEFAULT NULL');
+    await addIndexIfMissing(connection, 'inventario', 'id_solicitante_alta', '(id_solicitante_alta)');
+    await addIndexIfMissing(connection, 'inventario', 'id_aprobador_alta', '(id_aprobador_alta)');
+    await addForeignKeyIfMissing(
+      connection,
+      'inventario_ibfk_1',
+      `ALTER TABLE inventario
+       ADD CONSTRAINT inventario_ibfk_1
+       FOREIGN KEY (id_solicitante_alta) REFERENCES usuarios (id_usuario)`
+    );
+    await addForeignKeyIfMissing(
+      connection,
+      'inventario_ibfk_2',
+      `ALTER TABLE inventario
+       ADD CONSTRAINT inventario_ibfk_2
+       FOREIGN KEY (id_aprobador_alta) REFERENCES usuarios (id_usuario)`
+    );
+    await connection.query(
+      `UPDATE inventario
+       SET estado_revision = 'aprobado'
+       WHERE estado_revision IS NULL`
+    );
+
     await connection.query(
       `CREATE TABLE IF NOT EXISTS mensajes_sistema (
         id_mensaje int NOT NULL AUTO_INCREMENT,
@@ -89,7 +115,7 @@ async function migrate() {
         KEY id_movimiento (id_movimiento),
         CONSTRAINT mensajes_sistema_ibfk_1 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario),
         CONSTRAINT mensajes_sistema_ibfk_2 FOREIGN KEY (id_movimiento) REFERENCES movimientos (id_movimiento)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     );
 
     await connection.query(
@@ -102,7 +128,7 @@ async function migrate() {
         PRIMARY KEY (id_documento),
         KEY id_movimiento (id_movimiento),
         CONSTRAINT documentos_movimiento_ibfk_1 FOREIGN KEY (id_movimiento) REFERENCES movimientos (id_movimiento)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci`
+      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     );
 
     console.log('Migracion completada');

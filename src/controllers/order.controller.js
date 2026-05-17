@@ -58,6 +58,12 @@ async function revertOrder(req, res) {
 
 async function downloadOrderPdf(req, res) {
   const order = await orderService.getOrder(req.params.id);
+  if (order.tipo !== 'salida') {
+    const error = new Error('El vale PDF solo aplica para salidas');
+    error.status = 400;
+    throw error;
+  }
+
   const pdfBuffer = await pdfService.generateValePDF(order);
 
   res.set({

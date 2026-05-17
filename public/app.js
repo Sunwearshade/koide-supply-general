@@ -1,6 +1,6 @@
 const state = {
   inventory: [],
-  inventoryOptions: [],
+  pendingInventory: [],
   inventoryPage: 1,
   inventoryPagination: null,
   orders: [],
@@ -38,7 +38,10 @@ const els = {
   orderForm: document.querySelector('#orderForm'),
   detailRows: document.querySelector('#detailRows'),
   detailTemplate: document.querySelector('#detailTemplate'),
+  machineField: document.querySelector('#machineField'),
   inventoryRows: document.querySelector('#inventoryRows'),
+  pendingInventoryRows: document.querySelector('#pendingInventoryRows'),
+  refreshPendingInventory: document.querySelector('#refreshPendingInventory'),
   orderRows: document.querySelector('#orderRows'),
   movementRows: document.querySelector('#movementRows'),
   messageRows: document.querySelector('#messageRows'),
@@ -144,6 +147,10 @@ function canViewStats() {
   return hasRole(['admin', 'encargado']);
 }
 
+function canReviewOperations() {
+  return hasRole(['admin', 'encargado']);
+}
+
 function applyPermissions() {
   document.querySelectorAll('[data-roles]').forEach((element) => {
     const roles = element.dataset.roles.split(',');
@@ -205,18 +212,70 @@ function renderInventory() {
   els.inventoryNext.disabled = pagination.page >= pagination.totalPages;
 }
 
-function renderDetailSelects() {
-  const options = state.inventoryOptions
-    .map((item) => `<option value="${item.id_refaccion}">${escapeHtml(item.descripcion)} (${item.existencias})</option>`)
-    .join('');
+function optionLabel(item) {
+  const part = item.no_parte ? ` - ${item.no_parte}` : '';
+  const location = item.ubicacion ? ` - ${item.ubicacion}` : '';
+  return `${item.descripcion}${part}${location} (${item.existencias})`;
+}
 
-  document.querySelectorAll('#detailRows select[name="id_refaccion"]').forEach((select) => {
-    const selected = select.value;
-    select.innerHTML = options;
-    if (selected) select.value = selected;
-  });
+function renderPendingInventory() {
+  if (!els.pendingInventoryRows) return;
+
+  if (!canReviewOperations()) {
+    els.pendingInventoryRows.innerHTML = '';
+    return;
+  }
+
+  if (state.pendingInventory.length === 0) {
+    els.pendingInventoryRows.innerHTML = '<tr><td class="empty" colspan="7">Sin altas pendientes.</td></tr>';
+    return;
+  }
+
+  els.pendingInventoryRows.innerHTML = state.pendingInventory
+    .map(
+      (item) => `
+        <tr>
+          <td>${item.id_refaccion}</td>
+          <td>${escapeHtml(item.descripcion)}</td>
+          <td>${escapeHtml(item.no_parte)}</td>
+          <td>${escapeHtml(item.ubicacion)}</td>
+          <td>${escapeHtml(item.solicitante_alta)}</td>
+          <td>${formatDate(item.created_at)}</td>
+          <td>
+            <div class="actions">
+              <button type="button" data-approve-inventory="${item.id_refaccion}">Aprobar</button>
+              <button class="secondary" type="button" data-reject-inventory="${item.id_refaccion}">Rechazar</button>
+            </div>
+          </td>
+        </tr>
+      `
+    )
+    .join('');
+}
+
+function setDetailOptions(row, items, selectedValue = '') {
+  row.inventoryOptions = items;
+  const select = row.querySelector('[name="id_refaccion"]');
+  select.innerHTML =
+    '<option value="">Selecciona una refaccion</option>' +
+    items
+      .map((item) => `<option value="${item.id_refaccion}">${escapeHtml(optionLabel(item))}</option>`)
+      .join('');
+  select.disabled = items.length === 0;
+  if (selectedValue) select.value = selectedValue;
 
   updateQuantityLimits();
+}
+
+async function searchDetailOptions(row, query) {
+  const search = query.trim();
+  if (search.length < 2) {
+    setDetailOptions(row, []);
+    return;
+  }
+
+  const items = await api(`/api/inventario?all=1&q=${encodeURIComponent(search)}`);
+  setDetailOptions(row, items || []);
 }
 
 function updateQuantityLimits() {
@@ -224,7 +283,7 @@ function updateQuantityLimits() {
   document.querySelectorAll('#detailRows .detail-row').forEach((row) => {
     const select = row.querySelector('[name="id_refaccion"]');
     const quantity = row.querySelector('[name="cantidad"]');
-    const item = state.inventoryOptions.find((option) => Number(option.id_refaccion) === Number(select.value));
+    const item = (row.inventoryOptions || []).find((option) => Number(option.id_refaccion) === Number(select.value));
 
     if (type === 'salida' && item) {
       quantity.max = item.existencias;
@@ -237,23 +296,35 @@ function updateQuantityLimits() {
   });
 }
 
+function syncOrderTypeFields() {
+  const type = els.orderForm.elements.tipo.value;
+  const machineInput = els.orderForm.elements.maquina;
+  const isOutput = type === 'salida';
+
+  els.machineField.hidden = !isOutput;
+  machineInput.required = isOutput;
+  if (!isOutput) machineInput.value = '';
+
+  updateQuantityLimits();
+}
+
 function renderOrders() {
   if (state.orders.length === 0) {
-    els.orderRows.innerHTML = '<tr><td class="empty" colspan="7">Sin ordenes registradas.</td></tr>';
+    els.orderRows.innerHTML = '<tr><td class="empty" colspan="9">Sin ordenes registradas.</td></tr>';
     return;
   }
 
   els.orderRows.innerHTML = state.orders
     .map((order) => {
       const actions =
-        order.estado === 'pendiente'
+        order.estado === 'pendiente' && canReviewOperations()
           ? `
             <div class="actions">
               <button type="button" data-confirm="${order.id_orden}">Confirmar</button>
               <button class="secondary" type="button" data-cancel="${order.id_orden}">Cancelar</button>
             </div>
           `
-          : order.estado === 'completado' && Number(order.puede_revertir) === 1
+          : order.estado === 'completado' && Number(order.puede_revertir) === 1 && canReviewOperations()
             ? `<button class="secondary" type="button" data-revert-order="${order.id_orden}">Revertir</button>`
             : '-';
 
@@ -481,8 +552,9 @@ function renderStats() {
 
 function addDetailRow() {
   const node = els.detailTemplate.content.cloneNode(true);
+  const row = node.querySelector('.detail-row');
+  setDetailOptions(row, []);
   els.detailRows.appendChild(node);
-  renderDetailSelects();
 }
 
 function exportMissingItems(items, fileLabel) {
@@ -575,9 +647,15 @@ async function loadInventory() {
   renderInventory();
 }
 
-async function loadInventoryOptions() {
-  state.inventoryOptions = await api('/api/inventario?all=1');
-  renderDetailSelects();
+async function loadPendingInventory() {
+  if (!canReviewOperations()) {
+    state.pendingInventory = [];
+    renderPendingInventory();
+    return;
+  }
+
+  state.pendingInventory = await api('/api/inventario/pendientes');
+  renderPendingInventory();
 }
 
 async function loadOrders() {
@@ -647,7 +725,7 @@ async function loadStats() {
 
 async function refreshAll() {
   if (!state.user) return;
-  await Promise.all([loadInventory(), loadInventoryOptions(), loadOrders(), loadMovements(), loadMessages(), loadUsers(), loadReport(), loadStats()]);
+  await Promise.all([loadInventory(), loadPendingInventory(), loadOrders(), loadMovements(), loadMessages(), loadUsers(), loadReport(), loadStats()]);
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -773,7 +851,7 @@ els.inventoryForm.addEventListener('submit', async (event) => {
 
   try {
     const form = readForm(els.inventoryForm);
-    await api('/api/inventario', {
+    const item = await api('/api/inventario', {
       method: 'POST',
       body: JSON.stringify({
         descripcion: form.descripcion,
@@ -786,8 +864,33 @@ els.inventoryForm.addEventListener('submit', async (event) => {
     els.inventoryForm.reset();
     els.inventoryForm.elements.minimos.value = 0;
     els.inventoryForm.elements.maximos.value = 0;
-    await Promise.all([loadInventory(), loadInventoryOptions(), loadMessages()]);
-    showAlert('Refaccion agregada');
+    await Promise.all([loadInventory(), loadPendingInventory(), loadMessages()]);
+    showAlert(item.estado_revision === 'pendiente' ? 'Solicitud de alta enviada' : 'Refaccion agregada');
+  } catch (error) {
+    showAlert(error.message, 'error');
+  }
+});
+
+els.pendingInventoryRows.addEventListener('click', async (event) => {
+  const approveId = event.target.dataset.approveInventory;
+  const rejectId = event.target.dataset.rejectInventory;
+
+  try {
+    if (approveId) {
+      await api(`/api/inventario/${approveId}/aprobar`, { method: 'POST' });
+      await Promise.all([loadInventory(), loadPendingInventory(), loadMessages()]);
+      showAlert('Alta aprobada');
+    }
+
+    if (rejectId) {
+      const item = state.pendingInventory.find((pending) => Number(pending.id_refaccion) === Number(rejectId));
+      const confirmed = window.confirm(`Rechazar alta de ${item?.descripcion || 'esta refaccion'}?`);
+      if (!confirmed) return;
+
+      await api(`/api/inventario/${rejectId}/rechazar`, { method: 'POST' });
+      await Promise.all([loadPendingInventory(), loadMessages()]);
+      showAlert('Alta rechazada');
+    }
   } catch (error) {
     showAlert(error.message, 'error');
   }
@@ -804,13 +907,23 @@ els.detailRows.addEventListener('click', (event) => {
   event.target.closest('.detail-row').remove();
 });
 
+els.detailRows.addEventListener('input', (event) => {
+  if (!event.target.matches('.part-search')) return;
+
+  const input = event.target;
+  window.clearTimeout(input.timer);
+  input.timer = window.setTimeout(() => {
+    searchDetailOptions(input.closest('.detail-row'), input.value).catch((error) => showAlert(error.message, 'error'));
+  }, 250);
+});
+
 els.detailRows.addEventListener('change', (event) => {
   if (event.target.matches('[name="id_refaccion"]')) {
     updateQuantityLimits();
   }
 });
 
-els.orderForm.elements.tipo.addEventListener('change', updateQuantityLimits);
+els.orderForm.elements.tipo.addEventListener('change', syncOrderTypeFields);
 
 els.orderForm.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -822,19 +935,24 @@ els.orderForm.addEventListener('submit', async (event) => {
       cantidad: Number(row.querySelector('[name="cantidad"]').value)
     }));
 
+    if (detalles.some((detalle) => !detalle.id_refaccion)) {
+      throw new Error('Busca y selecciona una refaccion en cada renglon');
+    }
+
     const createdOrder = await api('/api/ordenes', {
       method: 'POST',
       body: JSON.stringify({
         tipo: form.tipo,
         solicitante: form.solicitante,
         turno: form.turno,
-        maquina: form.maquina,
+        maquina: form.tipo === 'salida' ? form.maquina : null,
+        numero_empleado: form.numero_empleado,
         detalles
       })
     });
 
-    // Descargar el PDF automáticamente
-    if (createdOrder && createdOrder.id_orden) {
+    // Descargar el PDF solo para salidas.
+    if (form.tipo === 'salida' && createdOrder && createdOrder.id_orden) {
       try {
         const response = await fetch(`/api/ordenes/${createdOrder.id_orden}/pdf`);
         if (response.ok) {
@@ -859,7 +977,8 @@ els.orderForm.addEventListener('submit', async (event) => {
     els.detailRows.innerHTML = '';
     addDetailRow();
     await Promise.all([loadOrders(), loadMessages()]);
-    showAlert('Orden creada y vale generado');
+    syncOrderTypeFields();
+    showAlert(form.tipo === 'salida' ? 'Orden creada y vale generado' : 'Entrada creada');
   } catch (error) {
     showAlert(error.message, 'error');
   }
@@ -927,6 +1046,10 @@ els.movementRows.addEventListener('click', async (event) => {
 document.querySelector('#refreshInventory').addEventListener('click', () => {
   state.inventoryPage = 1;
   loadInventory().catch((error) => showAlert(error.message, 'error'));
+});
+
+els.refreshPendingInventory.addEventListener('click', () => {
+  loadPendingInventory().catch((error) => showAlert(error.message, 'error'));
 });
 
 els.inventorySearch.addEventListener('input', () => {
@@ -1045,6 +1168,7 @@ els.statsPeriod.addEventListener('change', () => {
 });
 
 addDetailRow();
+syncOrderTypeFields();
 loadSession()
   .then(refreshAll)
   .catch((error) => showAlert(error.message, 'error'));

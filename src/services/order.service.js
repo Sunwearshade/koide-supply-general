@@ -30,8 +30,8 @@ function validateOrderPayload({ tipo, id_operador, detalles }) {
 
 async function listOrders() {
   const [rows] = await pool.execute(
-    `SELECT o.id_orden, o.tipo, o.solicitante, o.id_operador, u.nombre AS operador,
-            o.estado, o.fecha,
+    `SELECT o.id_orden, o.tipo, o.solicitante, o.turno, o.maquina, o.numero_empleado,
+            o.id_operador, u.nombre AS operador, o.estado, o.fecha,
             EXISTS (
               SELECT 1
               FROM movimientos m
@@ -53,8 +53,8 @@ async function listOrders() {
 
 async function getOrder(idOrden) {
   const [orders] = await pool.execute(
-    `SELECT o.id_orden, o.tipo, o.solicitante, o.id_operador, u.nombre AS operador,
-            o.estado, o.fecha
+    `SELECT o.id_orden, o.tipo, o.solicitante, o.turno, o.maquina, o.numero_empleado,
+            o.id_operador, u.nombre AS operador, o.estado, o.fecha
      FROM ordenes o
      INNER JOIN usuarios u ON u.id_usuario = o.id_operador
      WHERE o.id_orden = ?
@@ -106,9 +106,9 @@ async function createOrder({ tipo, solicitante, turno, maquina, numero_empleado,
     }
 
     const [orderResult] = await connection.execute(
-      `INSERT INTO ordenes (tipo, solicitante, id_operador, estado)
-       VALUES (?, ?, ?, 'pendiente')`,
-      [tipo, solicitante || null, id_operador]
+      `INSERT INTO ordenes (tipo, solicitante, turno, maquina, numero_empleado, id_operador, estado)
+       VALUES (?, ?, ?, ?, ?, ?, 'pendiente')`,
+      [tipo, solicitante || null, turno || null, maquina || null, numero_empleado || null, id_operador]
     );
 
     const idOrden = orderResult.insertId;

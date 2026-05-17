@@ -78,7 +78,7 @@
           <div class="actions">
             <input id="inventorySearch" type="search" placeholder="Buscar refaccion">
             <button id="refreshInventory" type="button">Actualizar</button>
-            <button id="showInventoryForm" type="button" data-roles="admin,encargado">Dar de alta</button>
+            <button id="showInventoryForm" type="button" data-roles="admin,encargado,operador">Dar de alta</button>
           </div>
         </div>
 
@@ -127,6 +127,32 @@
           <span id="inventoryPageInfo"></span>
           <button id="inventoryNext" class="secondary" type="button">Siguiente</button>
         </div>
+
+        <section class="report-block" data-roles="admin,encargado">
+          <div class="section-head">
+            <div>
+              <h3>Altas pendientes</h3>
+              <p>Solicitudes capturadas por almacenistas.</p>
+            </div>
+            <button id="refreshPendingInventory" class="secondary" type="button">Actualizar</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Descripcion</th>
+                  <th>No. parte</th>
+                  <th>Ubicacion</th>
+                  <th>Solicitante</th>
+                  <th>Fecha</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="pendingInventoryRows"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
 
       <section id="ordenes" class="view">
@@ -143,8 +169,8 @@
             <label>
               Tipo
               <select name="tipo" required>
-                <option value="entrada">Entrada</option>
                 <option value="salida">Salida</option>
+                <option value="entrada">Entrada</option>
               </select>
             </label>
             <label>
@@ -159,7 +185,7 @@
                 <option value="C">C</option>
               </select>
             </label>
-            <label>
+            <label id="machineField">
               Maquina
               <input name="maquina" type="text" required>
             </label>
@@ -437,7 +463,11 @@
     <template id="detailTemplate">
       <div class="detail-row">
         <label>
-          Refaccion
+          Buscar refaccion
+          <input class="part-search" type="search" placeholder="Descripcion, no. parte o ubicacion" autocomplete="off">
+        </label>
+        <label>
+          Seleccionar
           <select name="id_refaccion" required></select>
         </label>
         <label>

@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   created_at datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id_usuario),
   UNIQUE KEY username (username)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS inventario (
   id_refaccion int NOT NULL AUTO_INCREMENT,
@@ -22,10 +22,18 @@ CREATE TABLE IF NOT EXISTS inventario (
   minimos int DEFAULT '0',
   maximos int DEFAULT '0',
   activo tinyint(1) DEFAULT '1',
+  estado_revision enum('pendiente','aprobado','rechazado') DEFAULT 'aprobado',
+  id_solicitante_alta int DEFAULT NULL,
+  id_aprobador_alta int DEFAULT NULL,
+  fecha_revision datetime DEFAULT NULL,
   created_at datetime DEFAULT CURRENT_TIMESTAMP,
   updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (id_refaccion)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+  PRIMARY KEY (id_refaccion),
+  KEY id_solicitante_alta (id_solicitante_alta),
+  KEY id_aprobador_alta (id_aprobador_alta),
+  CONSTRAINT inventario_ibfk_1 FOREIGN KEY (id_solicitante_alta) REFERENCES usuarios (id_usuario),
+  CONSTRAINT inventario_ibfk_2 FOREIGN KEY (id_aprobador_alta) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS ordenes (
   id_orden int NOT NULL AUTO_INCREMENT,
@@ -40,7 +48,7 @@ CREATE TABLE IF NOT EXISTS ordenes (
   PRIMARY KEY (id_orden),
   KEY id_operador (id_operador),
   CONSTRAINT ordenes_ibfk_1 FOREIGN KEY (id_operador) REFERENCES usuarios (id_usuario)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS orden_detalle (
   id_detalle int NOT NULL AUTO_INCREMENT,
@@ -52,7 +60,7 @@ CREATE TABLE IF NOT EXISTS orden_detalle (
   KEY id_refaccion (id_refaccion),
   CONSTRAINT orden_detalle_ibfk_1 FOREIGN KEY (id_orden) REFERENCES ordenes (id_orden),
   CONSTRAINT orden_detalle_ibfk_2 FOREIGN KEY (id_refaccion) REFERENCES inventario (id_refaccion)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS movimientos (
   id_movimiento int NOT NULL AUTO_INCREMENT,
@@ -74,7 +82,7 @@ CREATE TABLE IF NOT EXISTS movimientos (
   CONSTRAINT movimientos_ibfk_2 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario),
   CONSTRAINT movimientos_ibfk_3 FOREIGN KEY (id_orden) REFERENCES ordenes (id_orden),
   CONSTRAINT movimientos_ibfk_4 FOREIGN KEY (id_movimiento_origen) REFERENCES movimientos (id_movimiento)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS mensajes_sistema (
   id_mensaje int NOT NULL AUTO_INCREMENT,
@@ -88,7 +96,7 @@ CREATE TABLE IF NOT EXISTS mensajes_sistema (
   KEY id_movimiento (id_movimiento),
   CONSTRAINT mensajes_sistema_ibfk_1 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario),
   CONSTRAINT mensajes_sistema_ibfk_2 FOREIGN KEY (id_movimiento) REFERENCES movimientos (id_movimiento)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS documentos_movimiento (
   id_documento int NOT NULL AUTO_INCREMENT,
@@ -99,4 +107,4 @@ CREATE TABLE IF NOT EXISTS documentos_movimiento (
   PRIMARY KEY (id_documento),
   KEY id_movimiento (id_movimiento),
   CONSTRAINT documentos_movimiento_ibfk_1 FOREIGN KEY (id_movimiento) REFERENCES movimientos (id_movimiento)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

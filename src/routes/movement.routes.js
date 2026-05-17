@@ -10,6 +10,6 @@ router.use(requireSession);
 router.get('/', requireRoles(['admin', 'encargado']), asyncHandler(movementController.listMovements));
 router.get('/mensajes', requireRoles(['admin', 'encargado']), asyncHandler(movementController.listSystemMessages));
 router.get('/:id/documento', requireRoles(['admin', 'encargado']), asyncHandler(movementController.getMovementDocument));
-router.post('/:id/revertir', asyncHandler(movementController.revertMovement));
+router.post('/:id/revertir', requireRoles(['admin', 'encargado']), asyncHandler(movementController.revertMovement));
 
 module.exports = router;

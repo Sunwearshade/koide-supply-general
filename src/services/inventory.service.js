@@ -79,20 +79,116 @@ async function getInventoryItem(idRefaccion) {
   return rows[0];
 }
 
-async function createInventoryItem({ descripcion, no_parte, ubicacion, minimos = 0, maximos = 0 }) {
+async function getAnyInventoryItem(idRefaccion) {
+  const [rows] = await pool.execute(
+    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos,
+            i.activo, i.estado_revision, i.id_solicitante_alta, s.nombre AS solicitante_alta,
+            i.id_aprobador_alta, a.nombre AS aprobador_alta, i.fecha_revision, i.created_at
+     FROM inventario i
+     LEFT JOIN usuarios s ON s.id_usuario = i.id_solicitante_alta
+     LEFT JOIN usuarios a ON a.id_usuario = i.id_aprobador_alta
+     WHERE i.id_refaccion = ?
+     LIMIT 1`,
+    [idRefaccion]
+  );
+
+  if (!rows[0]) {
+    const error = new Error('Refaccion no encontrada');
+    error.status = 404;
+    throw error;
+  }
+
+  return rows[0];
+}
+
+async function createInventoryItem({ descripcion, no_parte, ubicacion, minimos = 0, maximos = 0 }, actor = null) {
   if (!descripcion) {
     const error = new Error('descripcion es requerida');
     error.status = 400;
     throw error;
   }
 
+  const role = actor && (actor.role || actor.rol);
+  const requiresApproval = role === 'operador';
+  const estadoRevision = requiresApproval ? 'pendiente' : 'aprobado';
+  const activo = requiresApproval ? 0 : 1;
+
   const [result] = await pool.execute(
-    `INSERT INTO inventario (descripcion, no_parte, ubicacion, existencias, minimos, maximos)
-     VALUES (?, ?, ?, 0, ?, ?)`,
-    [descripcion, no_parte || null, ubicacion || null, minimos, maximos]
+    `INSERT INTO inventario (
+      descripcion, no_parte, ubicacion, existencias, minimos, maximos,
+      activo, estado_revision, id_solicitante_alta
+    )
+     VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?)`,
+    [
+      descripcion,
+      no_parte || null,
+      ubicacion || null,
+      minimos,
+      maximos,
+      activo,
+      estadoRevision,
+      actor ? actor.id_usuario : null
+    ]
   );
 
-  return getInventoryItem(result.insertId);
+  return getAnyInventoryItem(result.insertId);
+}
+
+async function listPendingInventory() {
+  const [rows] = await pool.execute(
+    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos,
+            i.estado_revision, i.created_at, u.nombre AS solicitante_alta
+     FROM inventario i
+     LEFT JOIN usuarios u ON u.id_usuario = i.id_solicitante_alta
+     WHERE i.estado_revision = 'pendiente'
+     ORDER BY i.created_at ASC, i.descripcion ASC`
+  );
+
+  return rows;
+}
+
+async function approveInventoryItem(idRefaccion, actor) {
+  const item = await getAnyInventoryItem(idRefaccion);
+
+  if (item.estado_revision !== 'pendiente') {
+    const error = new Error('La refaccion no tiene aprobacion pendiente');
+    error.status = 400;
+    throw error;
+  }
+
+  await pool.execute(
+    `UPDATE inventario
+     SET activo = 1,
+         estado_revision = 'aprobado',
+         id_aprobador_alta = ?,
+         fecha_revision = NOW()
+     WHERE id_refaccion = ?`,
+    [actor.id_usuario, idRefaccion]
+  );
+
+  return getAnyInventoryItem(idRefaccion);
+}
+
+async function rejectInventoryItem(idRefaccion, actor) {
+  const item = await getAnyInventoryItem(idRefaccion);
+
+  if (item.estado_revision !== 'pendiente') {
+    const error = new Error('La refaccion no tiene aprobacion pendiente');
+    error.status = 400;
+    throw error;
+  }
+
+  await pool.execute(
+    `UPDATE inventario
+     SET activo = 0,
+         estado_revision = 'rechazado',
+         id_aprobador_alta = ?,
+         fecha_revision = NOW()
+     WHERE id_refaccion = ?`,
+    [actor.id_usuario, idRefaccion]
+  );
+
+  return getAnyInventoryItem(idRefaccion);
 }
 
 async function updateInventoryItem(idRefaccion, { descripcion, no_parte, ubicacion, minimos, maximos, activo }) {
@@ -159,6 +255,9 @@ module.exports = {
   listInventory,
   getInventoryItem,
   createInventoryItem,
+  listPendingInventory,
+  approveInventoryItem,
+  rejectInventoryItem,
   updateInventoryItem,
   deleteInventoryItem
 };
