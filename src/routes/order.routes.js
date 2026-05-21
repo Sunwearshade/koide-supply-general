@@ -7,7 +7,7 @@ const router = express.Router();
 
 router.use(requireSession);
 
-router.get('/', asyncHandler(orderController.listOrders));
+router.get('/', asyncHandler(orderController.listOrders));   // acepta ?date=YYYY-MM-DD
 router.get('/:id', asyncHandler(orderController.getOrder));
 router.get('/:id/pdf', asyncHandler(orderController.downloadOrderPdf));
 router.post('/', asyncHandler(orderController.createOrder));

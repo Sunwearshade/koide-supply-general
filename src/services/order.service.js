@@ -28,27 +28,97 @@ function validateOrderPayload({ tipo, id_operador, detalles }) {
   });
 }
 
-async function listOrders() {
-  const [rows] = await pool.execute(
-    `SELECT o.id_orden, o.tipo, o.solicitante, o.turno, o.maquina, o.numero_empleado,
-            o.id_operador, u.nombre AS operador, o.estado, o.fecha,
-            EXISTS (
-              SELECT 1
-              FROM movimientos m
-              WHERE m.id_orden = o.id_orden
-                AND m.es_reversion = 0
-                AND NOT EXISTS (
-                  SELECT 1
-                  FROM movimientos r
-                  WHERE r.id_movimiento_origen = m.id_movimiento
-                )
-            ) AS puede_revertir
-     FROM ordenes o
-     INNER JOIN usuarios u ON u.id_usuario = o.id_operador
-     ORDER BY o.fecha DESC, o.id_orden DESC`
+// Acepta filtros opcionales:
+//   { date: 'YYYY-MM-DD' }         → resultado plano de ese dia (comportamiento admin)
+//   { idOperador: N }              → solo ordenes de ese operador
+//   { historyPage, historyLimit }  → pagina del historico (ordenes > 72 h)
+//
+// Sin `date`: devuelve { recent: [...], history: { items, pagination } }
+//   recent  = todas las ordenes de las ultimas 72 horas
+//   history = ordenes anteriores a 72 h, paginadas
+//
+// Con `date`: devuelve array plano (igual que antes)
+async function listOrders({ date = null, idOperador = null, historyPage = 1, historyLimit = 25 } = {}) {
+  const hasDate = date && /^\d{4}-\d{2}-\d{2}$/.test(date);
+  const hasOperador = Number.isInteger(Number(idOperador)) && Number(idOperador) > 0;
+
+  const operadorCondition = hasOperador ? 'AND o.id_operador = ?' : '';
+  const operadorParam = hasOperador ? [Number(idOperador)] : [];
+
+  const orderSelect = `
+    SELECT o.id_orden, o.tipo, o.solicitante, o.turno, o.maquina, o.numero_empleado,
+           o.id_operador, u.nombre AS operador, o.estado, o.fecha,
+           EXISTS (
+             SELECT 1
+             FROM movimientos m
+             WHERE m.id_orden = o.id_orden
+               AND m.es_reversion = 0
+               AND NOT EXISTS (
+                 SELECT 1
+                 FROM movimientos r
+                 WHERE r.id_movimiento_origen = m.id_movimiento
+               )
+           ) AS puede_revertir
+    FROM ordenes o
+    INNER JOIN usuarios u ON u.id_usuario = o.id_operador`;
+
+  // ── Modo filtro de fecha: resultado plano (flujo original del admin) ──
+  if (hasDate) {
+    const conditions = [`DATE(o.fecha) = ?`];
+    const params = [date];
+    if (hasOperador) {
+      conditions.push('o.id_operador = ?');
+      params.push(Number(idOperador));
+    }
+    const sql = `${orderSelect} WHERE ${conditions.join(' AND ')} ORDER BY o.fecha DESC, o.id_orden DESC`;
+    const [rows] = await pool.execute(sql, params);
+    return rows;
+  }
+
+  // ── Modo dual: recientes (72 h) + historico paginado ──
+  const safePage = Math.max(Number(historyPage) || 1, 1);
+  const safeLimit = Math.min(Math.max(Number(historyLimit) || 25, 1), 100);
+  const offset = (safePage - 1) * safeLimit;
+
+  const [recent] = await pool.execute(
+    `${orderSelect}
+     WHERE o.fecha >= NOW() - INTERVAL 72 HOUR
+     ${operadorCondition}
+     ORDER BY o.fecha DESC, o.id_orden DESC`,
+    operadorParam
   );
 
-  return rows;
+  const [historyRows] = await pool.execute(
+    `${orderSelect}
+     WHERE o.fecha < NOW() - INTERVAL 72 HOUR
+     ${operadorCondition}
+     ORDER BY o.fecha DESC, o.id_orden DESC
+     LIMIT ${safeLimit} OFFSET ${offset}`,
+    operadorParam
+  );
+
+  const [[countRow]] = await pool.execute(
+    `SELECT COUNT(*) AS total
+     FROM ordenes o
+     WHERE o.fecha < NOW() - INTERVAL 72 HOUR
+     ${operadorCondition}`,
+    operadorParam
+  );
+
+  const total = Number(countRow.total || 0);
+
+  return {
+    recent,
+    history: {
+      items: historyRows,
+      pagination: {
+        page: safePage,
+        limit: safeLimit,
+        total,
+        totalPages: Math.max(Math.ceil(total / safeLimit), 1)
+      }
+    }
+  };
 }
 
 async function getOrder(idOrden) {

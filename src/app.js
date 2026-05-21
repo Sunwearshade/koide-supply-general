@@ -32,7 +32,13 @@ app.get('/api/health', (req, res) => {
   res.json({ ok: true, app: 'Koide Supply' });
 });
 
+const { requirePasswordChanged } = require('./middlewares/auth.middleware');
+
 app.use('/api/usuarios', userRoutes);
+
+// Bloquea el resto de la API si el usuario debe cambiar su contrasena
+app.use(requirePasswordChanged);
+
 app.use('/api/inventario', inventoryRoutes);
 app.use('/api/ordenes', orderRoutes);
 app.use('/api/movimientos', movementRoutes);

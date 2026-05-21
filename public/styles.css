@@ -115,13 +115,10 @@ h3 {
 
 .session-box {
   display: grid;
-  gap: 8px;
-  align-items: center;
-}
-
-.session-box {
   grid-template-columns: auto auto;
   justify-self: end;
+  gap: 8px;
+  align-items: center;
   padding: 8px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -370,6 +367,87 @@ tr:last-child td {
   width: min(240px, 100%);
 }
 
+.date-filter-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.date-filter-label input[type="date"] {
+  min-height: 40px;
+  width: auto;
+}
+
+/* ── Bloques de órdenes (72h + historial) ── */
+.orders-block {
+  margin-top: 24px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.orders-block .table-wrap {
+  border: none;
+  border-radius: 0;
+  border-top: 1px solid var(--line);
+}
+
+.orders-block-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px 16px;
+  background: #f6f7f9;
+}
+
+.orders-block-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 0;
+}
+
+.orders-block-icon {
+  font-size: 16px;
+}
+
+.orders-block-sub {
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.orders-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #e1f2e9;
+  color: var(--good);
+  white-space: nowrap;
+}
+
+.orders-block--history .orders-block-header {
+  background: #f0f4f8;
+  border-top: 2px solid var(--line);
+}
+
+.orders-block .pager {
+  padding: 10px 14px;
+  border-top: 1px solid var(--line);
+  background: #f9fafb;
+}
+
+
 .pager {
   display: flex;
   gap: 10px;
@@ -403,6 +481,176 @@ tr:last-child td {
   color: var(--muted);
 }
 
+/* Adjustment mode styles */
+.adjustment-banner {
+  padding: 12px 16px;
+  border-radius: 6px;
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.adjustment-banner.inactive {
+  color: var(--muted);
+  border: 1px solid var(--line);
+  background: #f9fafb;
+}
+
+.adjustment-banner.active {
+  color: #1f7a4d;
+  border: 1px solid #b8ddc8;
+  background: #effaf3;
+}
+
+#adjustmentEditSection .table-wrap {
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+#adjustmentEditSection table {
+  min-width: 900px;
+}
+
+#adjustmentEditSection td input {
+  min-height: 32px;
+  padding: 4px 8px;
+  font-size: 13px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+#adjustmentEditSection td input[type="number"] {
+  width: 90px;
+}
+
+#adjustmentEditSection td input[type="text"] {
+  width: 100%;
+  min-width: 100px;
+}
+
+#adjustmentEditSection td input.modified {
+  border-color: var(--accent);
+  background: #f0f8ff;
+}
+
+#adjustmentEditSection td.id-cell {
+  font-weight: 700;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+button.danger {
+  background: var(--bad);
+  color: #ffffff;
+}
+
+button.danger:hover {
+  background: #842727;
+}
+
+#saveAdjustment {
+  background: var(--good);
+}
+
+#saveAdjustment:hover {
+  background: #176039;
+}
+
+.report-block h4 {
+  font-size: 15px;
+  margin: 0;
+}
+
+/* ── Filas de ajuste general ── */
+.adj-row-delete td {
+  background: #fff4f4 !important;
+  color: var(--bad);
+  text-decoration: line-through;
+  opacity: 0.85;
+}
+
+.adj-row-delete td.adj-delete-label {
+  text-decoration: none;
+  font-style: italic;
+}
+
+.adj-row-new td {
+  background: #f0faf4 !important;
+  color: var(--good);
+}
+
+.adj-row-add-btn td {
+  padding: 6px 8px;
+  background: #f6f7f9;
+}
+
+.adj-section-header td {
+  padding: 10px 14px;
+  font-weight: 700;
+  font-size: 13px;
+  background: #edf1f5;
+  color: var(--muted);
+  border-top: 2px solid var(--line);
+}
+
+.adj-section-header.adj-section-delete td {
+  background: #fff4f4;
+  color: var(--bad);
+  border-top-color: #e4b5b5;
+}
+
+.adj-section-header.adj-section-new td {
+  background: #effaf3;
+  color: var(--good);
+  border-top-color: #b8ddc8;
+}
+
+.adj-btn-delete {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 14px;
+  background: var(--bad);
+  color: #fff;
+  border-radius: 4px;
+}
+
+.adj-btn-delete:hover {
+  background: #842727;
+}
+
+.adj-btn-restore {
+  min-height: 30px;
+  padding: 0 10px;
+  font-size: 12px;
+  background: #e7ebf0;
+  color: var(--ink);
+  border-radius: 4px;
+}
+
+.adj-btn-restore:hover {
+  background: var(--line);
+}
+
+/* Botón "＋ Nueva refacción" en barra de acciones del ajuste */
+.adj-add-action {
+  background: var(--good);
+  color: #ffffff;
+  font-weight: 600;
+}
+
+.adj-add-action:hover {
+  background: #176039;
+}
+
+.adj-modified-cell {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+
 @media (max-width: 860px) {
   .topbar {
     grid-template-columns: 1fr;
@@ -426,4 +674,56 @@ tr:last-child td {
     align-items: stretch;
     flex-direction: column;
   }
+}
+
+/* ── Modal de cambio obligatorio de contraseña ── */
+.cp-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(10, 18, 28, 0.72);
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  backdrop-filter: blur(4px);
+}
+
+.cp-modal {
+  width: min(440px, 100%);
+  background: var(--surface);
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  padding: 32px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.25);
+  animation: cp-slide-in 0.25s ease;
+}
+
+@keyframes cp-slide-in {
+  from { transform: translateY(-18px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.cp-header {
+  margin-bottom: 24px;
+}
+
+.cp-header h2 {
+  margin: 6px 0 8px;
+  font-size: 22px;
+}
+
+.cp-subtitle {
+  color: var(--muted);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.cp-form {
+  display: grid;
+  gap: 16px;
+}
+
+.cp-form button[type="submit"] {
+  width: 100%;
+  margin-top: 4px;
 }

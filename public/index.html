@@ -153,6 +153,86 @@
             </table>
           </div>
         </section>
+
+        <section class="report-block" data-roles="admin,encargado">
+          <div class="section-head">
+            <div>
+              <h3>Ajuste general de inventario</h3>
+              <p>Correccion masiva del inventario real. Solo disponible cuando el modo esta activo.</p>
+            </div>
+            <div class="actions">
+              <button id="refreshAdjustmentMode" class="secondary" type="button">Actualizar</button>
+              <button id="toggleAdjustmentMode" type="button" data-roles="admin">Activar modo</button>
+            </div>
+          </div>
+
+          <div id="adjustmentBanner" class="adjustment-banner inactive">
+            <span id="adjustmentBannerText">Modo de ajuste: Inactivo</span>
+          </div>
+
+          <div id="adjustmentEditSection" hidden>
+            <div class="section-head">
+              <div>
+                <p id="adjustmentInstructionText">Modifica las cantidades y haz clic en Guardar Progreso. Al terminar, envía a revisión.</p>
+              </div>
+              <div class="actions">
+                <input id="adjustmentSearch" type="search" placeholder="Buscar refaccion">
+                <button id="addAdjustmentRowAction" type="button" class="adj-add-action" hidden>＋ Nueva refaccion</button>
+                <button id="saveAdjustmentDraft" type="button" class="secondary" data-roles="encargado,admin">Guardar progreso</button>
+                <button id="sendAdjustmentReview" type="button" data-roles="encargado,admin">Inventario actualizado (Enviar a revision)</button>
+                <button id="approveAdjustment" type="button" data-roles="admin" hidden>Confirmar y Aplicar Inventario</button>
+                <button id="rejectAdjustment" type="button" class="danger" data-roles="admin" hidden>Rechazar (Reabrir edición)</button>
+              </div>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Descripcion</th>
+                    <th>No. parte</th>
+                    <th>Ubicacion</th>
+                    <th>Existencias</th>
+                    <th>Min</th>
+                    <th>Max</th>
+                    <th>Accion</th>
+                  </tr>
+                </thead>
+                <tbody id="adjustmentRows"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div id="adjustmentLogsSection">
+            <div class="section-head">
+              <div>
+                <h4>Logs de auditoria</h4>
+              </div>
+              <button id="refreshAdjustmentLogs" class="secondary" type="button">Actualizar logs</button>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Refaccion</th>
+                    <th>Campo</th>
+                    <th>Anterior</th>
+                    <th>Nuevo</th>
+                    <th>Usuario</th>
+                    <th>Fecha</th>
+                  </tr>
+                </thead>
+                <tbody id="adjustmentLogRows"></tbody>
+              </table>
+            </div>
+            <div class="pager">
+              <button id="adjustmentLogPrev" class="secondary" type="button">Anterior</button>
+              <span id="adjustmentLogPageInfo"></span>
+              <button id="adjustmentLogNext" class="secondary" type="button">Siguiente</button>
+            </div>
+          </div>
+        </section>
       </section>
 
       <section id="ordenes" class="view">
@@ -161,7 +241,9 @@
             <h2>Ordenes</h2>
             <p>Crea entradas o salidas y confirmalas para afectar stock.</p>
           </div>
-          <button id="refreshOrders" type="button">Actualizar</button>
+          <div class="actions">
+            <button id="refreshOrders" type="button">Actualizar</button>
+          </div>
         </div>
 
         <form id="orderForm" class="order-form">
@@ -199,24 +281,79 @@
           <button type="submit">Crear orden</button>
         </form>
 
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Tipo</th>
-                <th>Solicitante</th>
-                <th>Turno</th>
-                <th>Maquina</th>
-                <th>Operador</th>
-                <th>Estado</th>
-                <th>Fecha</th>
-                <th>Acciones</th>
-              </tr>
-            </thead>
-            <tbody id="orderRows"></tbody>
-          </table>
-        </div>
+        <!-- Bloque: Ordenes de las ultimas 72 horas -->
+        <section class="orders-block">
+          <div class="orders-block-header">
+            <div>
+              <h3 class="orders-block-title">
+                <span class="orders-block-icon">&#x1F550;</span>
+                Ultimas 72 horas
+              </h3>
+              <p class="orders-block-sub">Ordenes de los turnos recientes</p>
+            </div>
+            <span id="ordersRecentCount" class="orders-badge"></span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tipo</th>
+                  <th>Solicitante</th>
+                  <th>Turno</th>
+                  <th>Maquina</th>
+                  <th>No. Empleado</th>
+                  <th>Operador</th>
+                  <th>Estado</th>
+                  <th>Fecha</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="orderRows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Bloque: Historial paginado -->
+        <section class="orders-block orders-block--history">
+          <div class="orders-block-header">
+            <div>
+              <h3 class="orders-block-title">
+                <span class="orders-block-icon">&#x1F4CB;</span>
+                Historial
+              </h3>
+              <p class="orders-block-sub">Ordenes anteriores a las ultimas 72 horas</p>
+            </div>
+            <label class="date-filter-label">
+              Filtrar por fecha
+              <input id="orderDateFilter" type="date">
+            </label>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Tipo</th>
+                  <th>Solicitante</th>
+                  <th>Turno</th>
+                  <th>Maquina</th>
+                  <th>No. Empleado</th>
+                  <th>Operador</th>
+                  <th>Estado</th>
+                  <th>Fecha</th>
+                  <th>Acciones</th>
+                </tr>
+              </thead>
+              <tbody id="orderHistoryRows"></tbody>
+            </table>
+          </div>
+          <div class="pager">
+            <button id="orderHistoryPrev" class="secondary" type="button">Anterior</button>
+            <span id="orderHistoryPageInfo"></span>
+            <button id="orderHistoryNext" class="secondary" type="button">Siguiente</button>
+          </div>
+        </section>
       </section>
 
       <section id="reportes" class="view">
@@ -477,6 +614,29 @@
         <button type="button" class="remove-detail">Quitar</button>
       </div>
     </template>
+
+    <!-- Modal obligatorio de cambio de contraseña -->
+    <div id="changePasswordOverlay" class="cp-overlay" hidden>
+      <div class="cp-modal">
+        <div class="cp-header">
+          <p class="eyebrow">Seguridad</p>
+          <h2>Cambio de contraseña requerido</h2>
+          <p class="cp-subtitle">Tu cuenta fue creada con una contraseña temporal. Debes establecer una contraseña personal para continuar.</p>
+        </div>
+        <form id="changePasswordForm" class="cp-form">
+          <label>
+            Nueva contraseña
+            <input id="cpNewPassword" name="nueva_password" type="password" required minlength="6" autocomplete="new-password" placeholder="Mínimo 6 caracteres">
+          </label>
+          <label>
+            Confirmar contraseña
+            <input id="cpConfirmPassword" name="confirmar_password" type="password" required minlength="6" autocomplete="new-password" placeholder="Repite la contraseña">
+          </label>
+          <div id="cpAlert" class="alert" hidden></div>
+          <button type="submit" id="cpSubmit">Establecer contraseña</button>
+        </form>
+      </div>
+    </div>
 
     <script src="/app.js"></script>
   </body>

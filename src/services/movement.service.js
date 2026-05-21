@@ -128,33 +128,6 @@ async function revertMovement(idMovimiento, actor, motivo = 'Correccion operativ
       }
     );
 
-    await connection.execute(
-      `INSERT INTO documentos_movimiento (id_movimiento, tipo_documento, contenido)
-       VALUES (:idMovimiento, 'reversion_movimiento', CAST(:contenido AS JSON))`,
-      {
-        idMovimiento: idReversion,
-        contenido: JSON.stringify({
-          titulo: 'Permiso de actualizacion de inventario',
-          accion: 'reversion_movimiento',
-          movimiento_original: original.id_movimiento,
-          movimiento_reversion: idReversion,
-          refaccion: {
-            id_refaccion: original.id_refaccion,
-            descripcion: original.descripcion
-          },
-          usuario: {
-            id_usuario: actor.id_usuario,
-            nombre: actor.nombre,
-            rol: role
-          },
-          tipo_original: original.tipo,
-          tipo_reversion: reverseType,
-          cantidad: original.cantidad,
-          motivo
-        })
-      }
-    );
-
     await connection.commit();
 
     return {
@@ -338,34 +311,6 @@ async function revertOrderMovements(idOrden, actor, motivo = 'Correccion operati
           message,
           idUsuario: actor.id_usuario,
           idMovimiento: idReversion
-        }
-      );
-
-      await connection.execute(
-        `INSERT INTO documentos_movimiento (id_movimiento, tipo_documento, contenido)
-         VALUES (:idMovimiento, 'reversion_movimiento', CAST(:contenido AS JSON))`,
-        {
-          idMovimiento: idReversion,
-          contenido: JSON.stringify({
-            titulo: 'Permiso de actualizacion de inventario',
-            accion: 'reversion_orden',
-            id_orden: original.id_orden,
-            movimiento_original: original.id_movimiento,
-            movimiento_reversion: idReversion,
-            refaccion: {
-              id_refaccion: original.id_refaccion,
-              descripcion: original.descripcion
-            },
-            usuario: {
-              id_usuario: actor.id_usuario,
-              nombre: actor.nombre,
-              rol: role
-            },
-            tipo_original: original.tipo,
-            tipo_reversion: reverseType,
-            cantidad: original.cantidad,
-            motivo
-          })
         }
       );
 

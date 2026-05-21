@@ -4,8 +4,16 @@ const { createSystemMessage } = require('../services/system-message.service');
 const pdfService = require('../services/pdf.service');
 
 async function listOrders(req, res) {
-  const orders = await orderService.listOrders();
-  res.json(orders);
+  const user = req.session.user;
+  const isOperador = user && (user.role === 'operador' || user.rol === 'operador');
+
+  const result = await orderService.listOrders({
+    date: req.query.date || null,
+    idOperador: isOperador ? user.id_usuario : null,
+    historyPage: req.query.history_page || 1,
+    historyLimit: req.query.history_limit || 25
+  });
+  res.json(result);
 }
 
 async function getOrder(req, res) {

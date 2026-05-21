@@ -3,6 +3,12 @@ const state = {
   pendingInventory: [],
   inventoryPage: 1,
   inventoryPagination: null,
+  // Modo dual de ordenes: recientes (72h) + historico paginado
+  ordersRecent: [],          // ultimas 72 horas
+  ordersHistory: [],         // historico (pagina actual)
+  ordersHistoryPage: 1,
+  ordersHistoryPagination: null,
+  // Modo plano (filtro de fecha activo)
   orders: [],
   movements: [],
   messages: [],
@@ -14,7 +20,13 @@ const state = {
   onlyCriticalMissing: false,
   selectedMissing: new Set(),
   stats: null,
-  user: null
+  user: null,
+  adjustmentMode: { activo: false, updated_at: null, updated_by: null },
+  adjustmentItems: [],
+  adjustmentNewItems: [],
+  adjustmentLogs: [],
+  adjustmentLogsPage: 1,
+  adjustmentLogsPagination: null
 };
 
 const els = {
@@ -43,6 +55,12 @@ const els = {
   pendingInventoryRows: document.querySelector('#pendingInventoryRows'),
   refreshPendingInventory: document.querySelector('#refreshPendingInventory'),
   orderRows: document.querySelector('#orderRows'),
+  ordersRecentCount: document.querySelector('#ordersRecentCount'),
+  orderHistoryRows: document.querySelector('#orderHistoryRows'),
+  orderHistoryPrev: document.querySelector('#orderHistoryPrev'),
+  orderHistoryNext: document.querySelector('#orderHistoryNext'),
+  orderHistoryPageInfo: document.querySelector('#orderHistoryPageInfo'),
+  orderDateFilter: document.querySelector('#orderDateFilter'),
   movementRows: document.querySelector('#movementRows'),
   messageRows: document.querySelector('#messageRows'),
   messageSearch: document.querySelector('#messageSearch'),
@@ -63,7 +81,28 @@ const els = {
   flowRows: document.querySelector('#flowRows'),
   statsCards: document.querySelector('#statsCards'),
   topOutputRows: document.querySelector('#topOutputRows'),
-  topInputRows: document.querySelector('#topInputRows')
+  topInputRows: document.querySelector('#topInputRows'),
+  adjustmentBanner: document.querySelector('#adjustmentBanner'),
+  adjustmentBannerText: document.querySelector('#adjustmentBannerText'),
+  toggleAdjustmentMode: document.querySelector('#toggleAdjustmentMode'),
+  refreshAdjustmentMode: document.querySelector('#refreshAdjustmentMode'),
+  adjustmentEditSection: document.querySelector('#adjustmentEditSection'),
+  adjustmentInstructionText: document.querySelector('#adjustmentInstructionText'),
+  adjustmentSearch: document.querySelector('#adjustmentSearch'),
+  adjustmentRows: document.querySelector('#adjustmentRows'),
+  saveAdjustmentDraft: document.querySelector('#saveAdjustmentDraft'),
+  sendAdjustmentReview: document.querySelector('#sendAdjustmentReview'),
+  approveAdjustment: document.querySelector('#approveAdjustment'),
+  rejectAdjustment: document.querySelector('#rejectAdjustment'),
+  adjustmentLogRows: document.querySelector('#adjustmentLogRows'),
+  refreshAdjustmentLogs: document.querySelector('#refreshAdjustmentLogs'),
+  adjustmentLogPrev: document.querySelector('#adjustmentLogPrev'),
+  adjustmentLogNext: document.querySelector('#adjustmentLogNext'),
+  adjustmentLogPageInfo: document.querySelector('#adjustmentLogPageInfo'),
+  // Modal de cambio obligatorio de contraseña
+  changePasswordOverlay: document.querySelector('#changePasswordOverlay'),
+  changePasswordForm: document.querySelector('#changePasswordForm'),
+  cpAlert: document.querySelector('#cpAlert')
 };
 
 async function api(path, options = {}) {
@@ -175,11 +214,19 @@ function renderSession() {
     els.dashboard.hidden = false;
     els.sessionName.textContent = `${state.user.nombre} · ${roleLabel(state.user.role)}`;
     applyPermissions();
+
+    // Si el usuario debe cambiar su contrasena, mostrar el modal bloqueante
+    if (state.user.debe_cambiar_password) {
+      els.changePasswordOverlay.hidden = false;
+    } else {
+      els.changePasswordOverlay.hidden = true;
+    }
     return;
   }
 
   els.loginScreen.hidden = false;
   els.dashboard.hidden = true;
+  els.changePasswordOverlay.hidden = true;
   els.sessionName.textContent = '';
 }
 
@@ -231,6 +278,8 @@ function renderPendingInventory() {
     return;
   }
 
+  const isAdmin = hasRole(['admin']);
+
   els.pendingInventoryRows.innerHTML = state.pendingInventory
     .map(
       (item) => `
@@ -242,10 +291,11 @@ function renderPendingInventory() {
           <td>${escapeHtml(item.solicitante_alta)}</td>
           <td>${formatDate(item.created_at)}</td>
           <td>
+            ${isAdmin ? `
             <div class="actions">
               <button type="button" data-approve-inventory="${item.id_refaccion}">Aprobar</button>
               <button class="secondary" type="button" data-reject-inventory="${item.id_refaccion}">Rechazar</button>
-            </div>
+            </div>` : '<span>Pendiente de aprobacion</span>'}
           </td>
         </tr>
       `
@@ -308,41 +358,82 @@ function syncOrderTypeFields() {
   updateQuantityLimits();
 }
 
-function renderOrders() {
-  if (state.orders.length === 0) {
-    els.orderRows.innerHTML = '<tr><td class="empty" colspan="9">Sin ordenes registradas.</td></tr>';
+// Renderiza el bloque de ordenes recientes (ultimas 72 h)
+function renderRecentOrders() {
+  const orders = state.ordersRecent;
+  if (els.ordersRecentCount) {
+    els.ordersRecentCount.textContent = orders.length > 0 ? `${orders.length} orden${orders.length !== 1 ? 'es' : ''}` : '';
+  }
+
+  if (orders.length === 0) {
+    els.orderRows.innerHTML = '<tr><td class="empty" colspan="10">Sin ordenes en las ultimas 72 horas.</td></tr>';
     return;
   }
 
-  els.orderRows.innerHTML = state.orders
-    .map((order) => {
-      const actions =
-        order.estado === 'pendiente' && canReviewOperations()
-          ? `
-            <div class="actions">
-              <button type="button" data-confirm="${order.id_orden}">Confirmar</button>
-              <button class="secondary" type="button" data-cancel="${order.id_orden}">Cancelar</button>
-            </div>
-          `
-          : order.estado === 'completado' && Number(order.puede_revertir) === 1 && canReviewOperations()
-            ? `<button class="secondary" type="button" data-revert-order="${order.id_orden}">Revertir</button>`
-            : '-';
+  els.orderRows.innerHTML = orders.map((order) => renderOrderRow(order)).join('');
+}
 
-      return `
-        <tr>
-          <td>${order.id_orden}</td>
-          <td>${badge(order.tipo)}</td>
-          <td>${escapeHtml(order.solicitante)}</td>
-          <td>${escapeHtml(order.turno)}</td>
-          <td>${escapeHtml(order.maquina)}</td>
-          <td>${escapeHtml(order.operador || order.id_operador)}</td>
-          <td>${badge(order.estado)}</td>
-          <td>${formatDate(order.fecha)}</td>
-          <td>${actions}</td>
-        </tr>
-      `;
-    })
-    .join('');
+// Renderiza el bloque de historial paginado
+function renderHistoryOrders() {
+  if (!els.orderHistoryRows) return;
+
+  const orders = state.ordersHistory;
+  if (orders.length === 0) {
+    els.orderHistoryRows.innerHTML = '<tr><td class="empty" colspan="10">Sin ordenes en el historico.</td></tr>';
+  } else {
+    els.orderHistoryRows.innerHTML = orders.map((order) => renderOrderRow(order)).join('');
+  }
+
+  const pagination = state.ordersHistoryPagination || { page: 1, totalPages: 1 };
+  if (els.orderHistoryPageInfo) {
+    els.orderHistoryPageInfo.textContent = `Pagina ${pagination.page} de ${pagination.totalPages}`;
+  }
+  if (els.orderHistoryPrev) els.orderHistoryPrev.disabled = pagination.page <= 1;
+  if (els.orderHistoryNext) els.orderHistoryNext.disabled = pagination.page >= pagination.totalPages;
+}
+
+// Renderiza una fila de orden (compartido entre ambas secciones)
+function renderOrderRow(order) {
+  const actions =
+    order.estado === 'pendiente' && canReviewOperations()
+      ? `
+        <div class="actions">
+          <button type="button" data-confirm="${order.id_orden}">Confirmar</button>
+          <button class="secondary" type="button" data-cancel="${order.id_orden}">Cancelar</button>
+        </div>
+      `
+      : order.estado === 'completado' && Number(order.puede_revertir) === 1 && canReviewOperations()
+        ? `<button class="secondary" type="button" data-revert-order="${order.id_orden}">Revertir</button>`
+        : '-';
+
+  return `
+    <tr>
+      <td>${order.id_orden}</td>
+      <td>${badge(order.tipo)}</td>
+      <td>${escapeHtml(order.solicitante)}</td>
+      <td>${escapeHtml(order.turno)}</td>
+      <td>${escapeHtml(order.maquina)}</td>
+      <td>${escapeHtml(order.numero_empleado)}</td>
+      <td>${escapeHtml(order.operador || order.id_operador)}</td>
+      <td>${badge(order.estado)}</td>
+      <td>${formatDate(order.fecha)}</td>
+      <td>${actions}</td>
+    </tr>
+  `;
+}
+
+// renderOrders: modo plano (cuando hay filtro de fecha activo)
+function renderOrders() {
+  if (state.orders.length === 0) {
+    els.orderRows.innerHTML = '<tr><td class="empty" colspan="10">Sin ordenes para la fecha seleccionada.</td></tr>';
+    if (els.orderHistoryRows) els.orderHistoryRows.innerHTML = '';
+    if (els.ordersRecentCount) els.ordersRecentCount.textContent = '';
+    return;
+  }
+
+  els.orderRows.innerHTML = state.orders.map((order) => renderOrderRow(order)).join('');
+  if (els.orderHistoryRows) els.orderHistoryRows.innerHTML = '';
+  if (els.ordersRecentCount) els.ordersRecentCount.textContent = '';
 }
 
 function renderMovements() {
@@ -366,7 +457,7 @@ function renderMovements() {
           <td>
             ${
               Number(movement.es_reversion) === 1
-                ? `<button class="secondary" type="button" data-document="${movement.id_movimiento}">Documento</button>`
+                ? 'Revertido'
                 : Number(movement.fue_revertido) === 1
                   ? 'Revertido'
                   : `<button class="secondary" type="button" data-revert-movement="${movement.id_movimiento}">Revertir</button>`
@@ -659,8 +750,40 @@ async function loadPendingInventory() {
 }
 
 async function loadOrders() {
-  state.orders = await api('/api/ordenes');
-  renderOrders();
+  const dateVal = els.orderDateFilter ? els.orderDateFilter.value : '';
+
+  if (dateVal) {
+    // Modo plano: filtro de fecha activo
+    const url = `/api/ordenes?date=${encodeURIComponent(dateVal)}`;
+    const result = await api(url);
+    // El servicio devuelve array plano cuando hay date
+    state.orders = Array.isArray(result) ? result : [];
+    state.ordersRecent = [];
+    state.ordersHistory = [];
+    state.ordersHistoryPagination = null;
+    renderOrders();
+    if (els.orderHistoryRows) els.orderHistoryRows.innerHTML = '<tr><td class="empty" colspan="10">Usa el boton Actualizar para quitar el filtro.</td></tr>';
+    if (els.orderHistoryPageInfo) els.orderHistoryPageInfo.textContent = '';
+    if (els.orderHistoryPrev) els.orderHistoryPrev.disabled = true;
+    if (els.orderHistoryNext) els.orderHistoryNext.disabled = true;
+  } else {
+    // Modo dual: sin filtro de fecha
+    const result = await api(`/api/ordenes?history_page=${state.ordersHistoryPage}`);
+    state.ordersRecent = result.recent || [];
+    state.ordersHistory = (result.history && result.history.items) || [];
+    state.ordersHistoryPagination = (result.history && result.history.pagination) || null;
+    state.orders = [];
+    renderRecentOrders();
+    renderHistoryOrders();
+  }
+}
+
+async function loadOrdersHistory(page) {
+  state.ordersHistoryPage = page;
+  const result = await api(`/api/ordenes?history_page=${page}`);
+  state.ordersHistory = (result.history && result.history.items) || [];
+  state.ordersHistoryPagination = (result.history && result.history.pagination) || null;
+  renderHistoryOrders();
 }
 
 async function loadMovements() {
@@ -723,9 +846,359 @@ async function loadStats() {
   renderStats();
 }
 
+async function loadAdjustmentMode() {
+  if (!hasRole(['admin', 'encargado'])) {
+    state.adjustmentMode = { estado: 'inactivo' };
+    renderAdjustmentMode();
+    return;
+  }
+
+  state.adjustmentMode = await api('/api/inventario/ajuste/modo');
+  renderAdjustmentMode();
+
+  if (state.adjustmentMode.estado !== 'inactivo') {
+    await loadAdjustmentItems();
+  }
+}
+
+function renderAdjustmentMode() {
+  const mode = state.adjustmentMode;
+  const banner = els.adjustmentBanner;
+  const text = els.adjustmentBannerText;
+  const toggle = els.toggleAdjustmentMode;
+  const editSection = els.adjustmentEditSection;
+
+  if (!banner) return;
+
+  if (mode.estado === 'activo' || mode.estado === 'en_revision') {
+    banner.className = 'adjustment-banner active';
+    const byText = mode.updated_by ? ` por ${mode.updated_by}` : '';
+    text.textContent = `Modo de ajuste: ${mode.estado === 'en_revision' ? 'EN REVISIÓN' : 'ACTIVO'}${byText}`;
+    
+    if (toggle) {
+      toggle.textContent = 'Desactivar modo';
+      toggle.className = 'danger';
+    }
+    
+    const isReview = mode.estado === 'en_revision';
+    const isAdmin = state.user && state.user.rol === 'admin';
+    const isEncargado = state.user && state.user.rol === 'encargado';
+    
+    const showTable = (isEncargado && mode.estado === 'activo') || (isAdmin && isReview);
+    
+    if (editSection) {
+      editSection.hidden = !showTable;
+      
+      els.adjustmentInstructionText.textContent = isReview 
+        ? "Borrador en revisión. Confirma para aplicar los cambios o rechaza para devolverlos." 
+        : "Modifica las cantidades y haz clic en Guardar Progreso. Al terminar, envía a revisión.";
+      
+      // Determinar visibilidad de botones según estado y rol
+      if (els.saveAdjustmentDraft) els.saveAdjustmentDraft.hidden = isReview || !isEncargado;
+      if (els.sendAdjustmentReview) els.sendAdjustmentReview.hidden = isReview || !isEncargado;
+      if (els.approveAdjustment) els.approveAdjustment.hidden = !isReview || !isAdmin;
+      if (els.rejectAdjustment) els.rejectAdjustment.hidden = !isReview || !isAdmin;
+
+      // Mostrar/ocultar el botón de agregar nueva refacción en barra de acciones
+      const addRowBtn = document.querySelector('#addAdjustmentRowAction');
+      if (addRowBtn) addRowBtn.hidden = isReview || !isEncargado;
+
+      // Ocultar "Dar de alta" mientras el modo ajuste está activo (evita flujos paralelos)
+      if (els.showInventoryForm) {
+        els.showInventoryForm.hidden = !isReview && isEncargado && (mode.estado === 'activo');
+      }
+    }
+  } else {
+    banner.className = 'adjustment-banner inactive';
+    text.textContent = 'Modo de ajuste: Inactivo';
+    if (toggle) {
+      toggle.textContent = 'Activar modo';
+      toggle.className = '';
+    }
+    if (editSection) editSection.hidden = true;
+
+    // Restaurar botón "Dar de alta" cuando el modo está inactivo
+    if (els.showInventoryForm) els.showInventoryForm.hidden = false;
+
+    // Ocultar botón de agregar fila
+    const addRowBtn = document.querySelector('#addAdjustmentRowAction');
+    if (addRowBtn) addRowBtn.hidden = true;
+  }
+}
+
+async function loadAdjustmentItems() {
+  const allItems = await api('/api/inventario?all=1');
+  let drafts = [];
+  let newItems = [];
+  try {
+    drafts = await api('/api/inventario/ajuste/borrador');
+    newItems = await api('/api/inventario/ajuste/nuevos');
+  } catch (e) {
+    console.error('Error cargando borrador', e);
+  }
+
+  const draftMap = new Map();
+  drafts.forEach(d => draftMap.set(d.id_refaccion, d));
+
+  state.adjustmentItems = allItems.map(item => {
+    const draft = draftMap.get(item.id_refaccion);
+    if (draft) {
+      if (Number(draft.marcar_eliminar) === 1) {
+        return { ...item, _marcar_eliminar: true, isDraft: true };
+      }
+      const merged = { ...item };
+      ['descripcion', 'no_parte', 'ubicacion', 'existencias', 'minimos', 'maximos'].forEach(field => {
+        if (draft[field] !== null && draft[field] !== undefined) merged[field] = draft[field];
+      });
+      return {
+        ...merged,
+        old_descripcion: draft.old_descripcion,
+        old_no_parte: draft.old_no_parte,
+        old_ubicacion: draft.old_ubicacion,
+        old_existencias: draft.old_existencias,
+        old_minimos: draft.old_minimos,
+        old_maximos: draft.old_maximos,
+        isDraft: true
+      };
+    }
+    return item;
+  });
+
+  // Filas nuevas pendientes guardadas
+  state.adjustmentNewItems = newItems.map(n => ({ ...n, isNew: true }));
+
+  renderAdjustmentItems();
+}
+
+function renderAdjustmentItems() {
+  if (!els.adjustmentRows) return;
+
+  const searchTerm = (els.adjustmentSearch?.value || '').trim().toLowerCase();
+  let items = state.adjustmentItems || [];
+
+  if (searchTerm.length >= 2) {
+    items = items.filter((item) =>
+      (item.descripcion || '').toLowerCase().includes(searchTerm) ||
+      (item.no_parte || '').toLowerCase().includes(searchTerm) ||
+      (item.ubicacion || '').toLowerCase().includes(searchTerm)
+    );
+  }
+
+  const mode = state.adjustmentMode.estado;
+  const isEditing = mode === 'activo';
+  const isReview = mode === 'en_revision';
+
+  // -- Modo edición (encargado editando) --
+  if (isEditing) {
+    const existingRows = items.map((item) => {
+      const isDraft = item.isDraft;
+      const isDeleted = item._marcar_eliminar;
+      const getOriginal = (field) => isDraft && !isDeleted && item[`old_${field}`] !== undefined ? item[`old_${field}`] : item[field];
+      const isModified = (field) => isDraft && !isDeleted && String(item[field]) !== String(item[`old_${field}`]);
+
+      const rowClass = isDeleted ? 'adj-row-delete' : '';
+      const deleteBtn = isDeleted
+        ? `<button type="button" class="adj-btn-restore" data-adj-restore="${item.id_refaccion}" title="Deshacer eliminacion">↩ Restaurar</button>`
+        : `<button type="button" class="adj-btn-delete" data-adj-delete="${item.id_refaccion}" title="Marcar para eliminar">🗑</button>`;
+
+      if (isDeleted) {
+        return `
+          <tr data-adj-id="${item.id_refaccion}" class="${rowClass}">
+            <td class="id-cell">${item.id_refaccion}</td>
+            <td colspan="6" class="adj-delete-label">❌ ${escapeHtml(item.descripcion)} — marcada para <strong>eliminar</strong></td>
+            <td>${deleteBtn}</td>
+          </tr>`;
+      }
+
+      return `
+        <tr data-adj-id="${item.id_refaccion}" class="${rowClass}">
+          <td class="id-cell">${item.id_refaccion}</td>
+          <td><input type="text" name="descripcion" value="${escapeHtml(item.descripcion || '')}" data-original="${escapeHtml(getOriginal('descripcion') || '')}" class="${isModified('descripcion') ? 'modified' : ''}"></td>
+          <td><input type="text" name="no_parte" value="${escapeHtml(item.no_parte || '')}" data-original="${escapeHtml(getOriginal('no_parte') || '')}" class="${isModified('no_parte') ? 'modified' : ''}"></td>
+          <td><input type="text" name="ubicacion" value="${escapeHtml(item.ubicacion || '')}" data-original="${escapeHtml(getOriginal('ubicacion') || '')}" class="${isModified('ubicacion') ? 'modified' : ''}"></td>
+          <td><input type="number" name="existencias" min="0" value="${item.existencias}" data-original="${getOriginal('existencias')}" class="${isModified('existencias') ? 'modified' : ''}"></td>
+          <td><input type="number" name="minimos" min="0" value="${item.minimos}" data-original="${getOriginal('minimos')}" class="${isModified('minimos') ? 'modified' : ''}"></td>
+          <td><input type="number" name="maximos" min="0" value="${item.maximos}" data-original="${getOriginal('maximos')}" class="${isModified('maximos') ? 'modified' : ''}"></td>
+          <td>${deleteBtn}</td>
+        </tr>`;
+    });
+
+    // Filas nuevas en edición
+    const newRows = (state.adjustmentNewItems || []).map((item, idx) => `
+      <tr data-new-idx="${idx}" class="adj-row-new">
+        <td class="id-cell">+</td>
+        <td><input type="text" name="descripcion" value="${escapeHtml(item.descripcion || '')}" placeholder="Descripcion *"></td>
+        <td><input type="text" name="no_parte" value="${escapeHtml(item.no_parte || '')}" placeholder="No. parte"></td>
+        <td><input type="text" name="ubicacion" value="${escapeHtml(item.ubicacion || '')}" placeholder="Ubicacion"></td>
+        <td><input type="number" name="existencias" min="0" value="${item.existencias || 0}"></td>
+        <td><input type="number" name="minimos" min="0" value="${item.minimos || 0}"></td>
+        <td><input type="number" name="maximos" min="0" value="${item.maximos || 0}"></td>
+        <td><button type="button" class="adj-btn-delete" data-remove-new="${idx}">✕</button></td>
+      </tr>`);
+
+    // Fila separadora al final (sin el botón, que ahora está en la barra de acciones)
+    const addRow = `
+      <tr class="adj-row-add-btn" id="adj-add-row-placeholder"><td colspan="8"></td></tr>`;
+
+    if (items.length === 0 && (state.adjustmentNewItems || []).length === 0) {
+      els.adjustmentRows.innerHTML = `<tr><td class="empty" colspan="8">Sin items. Usa el boton de arriba para agregar una nueva refaccion.</td></tr>${addRow}`;
+    } else {
+      els.adjustmentRows.innerHTML = existingRows.join('') + newRows.join('') + addRow;
+    }
+    return;
+  }
+
+  // -- Modo revisión (admin revisando) --
+  if (isReview) {
+    const drafts = items.filter(i => i.isDraft);
+    const deletions = drafts.filter(i => i._marcar_eliminar);
+    const edits = drafts.filter(i => !i._marcar_eliminar);
+    const newItems = state.adjustmentNewItems || [];
+
+    const renderEdit = (item) => {
+      const isModified = (field) => String(item[field]) !== String(item[`old_${field}`]);
+      return `
+        <tr data-adj-id="${item.id_refaccion}">
+          <td class="id-cell">${item.id_refaccion}</td>
+          <td class="${isModified('descripcion') ? 'adj-modified-cell' : ''}">${escapeHtml(item.descripcion || '')}</td>
+          <td class="${isModified('no_parte') ? 'adj-modified-cell' : ''}">${escapeHtml(item.no_parte || '')}</td>
+          <td class="${isModified('ubicacion') ? 'adj-modified-cell' : ''}">${escapeHtml(item.ubicacion || '')}</td>
+          <td class="${isModified('existencias') ? 'adj-modified-cell' : ''}">${item.existencias}</td>
+          <td class="${isModified('minimos') ? 'adj-modified-cell' : ''}">${item.minimos}</td>
+          <td class="${isModified('maximos') ? 'adj-modified-cell' : ''}">${item.maximos}</td>
+          <td>✏️</td>
+        </tr>`;
+    };
+
+    const renderDeletion = (item) => `
+      <tr class="adj-row-delete">
+        <td class="id-cell">${item.id_refaccion}</td>
+        <td colspan="6">${escapeHtml(item.descripcion)}</td>
+        <td>🗑</td>
+      </tr>`;
+
+    const renderNew = (item) => `
+      <tr class="adj-row-new">
+        <td class="id-cell">+</td>
+        <td>${escapeHtml(item.descripcion)}</td>
+        <td>${escapeHtml(item.no_parte || '')}</td>
+        <td>${escapeHtml(item.ubicacion || '')}</td>
+        <td>${item.existencias || 0}</td>
+        <td>${item.minimos || 0}</td>
+        <td>${item.maximos || 0}</td>
+        <td>➕</td>
+      </tr>`;
+
+    let html = '';
+    if (edits.length > 0) html += `<tr class="adj-section-header"><td colspan="8">✏️ Ediciones (${edits.length})</td></tr>` + edits.map(renderEdit).join('');
+    if (deletions.length > 0) html += `<tr class="adj-section-header adj-section-delete"><td colspan="8">🗑 Bajas (${deletions.length})</td></tr>` + deletions.map(renderDeletion).join('');
+    if (newItems.length > 0) html += `<tr class="adj-section-header adj-section-new"><td colspan="8">➕ Altas (${newItems.length})</td></tr>` + newItems.map(renderNew).join('');
+    if (!html) html = '<tr><td class="empty" colspan="8">Sin cambios en el borrador.</td></tr>';
+
+    els.adjustmentRows.innerHTML = html;
+    return;
+  }
+
+  // Fallback sin modo activo
+  els.adjustmentRows.innerHTML = '<tr><td class="empty" colspan="8">Modo de ajuste inactivo.</td></tr>';
+}
+
+function collectAdjustmentChanges() {
+  const rows = els.adjustmentRows.querySelectorAll('tr[data-adj-id]');
+  const items = [];
+
+  rows.forEach((row) => {
+    const id = Number(row.dataset.adjId);
+
+    // Fila marcada para eliminar
+    if (row.classList.contains('adj-row-delete')) {
+      items.push({ id_refaccion: id, marcar_eliminar: true });
+      return;
+    }
+
+    const inputs = row.querySelectorAll('input');
+    const item = { id_refaccion: id };
+    let hasChange = false;
+
+    inputs.forEach((input) => {
+      const original = input.dataset.original || '';
+      const current = input.value;
+      if (current !== original) {
+        hasChange = true;
+        item[input.name] = input.type === 'number' ? Number(current) : current;
+      }
+    });
+
+    if (hasChange) items.push(item);
+  });
+
+  return items;
+}
+
+function collectAdjustmentNewItems() {
+  const rows = els.adjustmentRows.querySelectorAll('tr[data-new-idx]');
+  const items = [];
+  rows.forEach((row) => {
+    const inputs = row.querySelectorAll('input');
+    const item = {};
+    inputs.forEach(input => {
+      item[input.name] = input.type === 'number' ? Number(input.value) : input.value;
+    });
+    if (item.descripcion && item.descripcion.trim()) items.push(item);
+  });
+  return items;
+}
+
+async function loadAdjustmentLogs() {
+  if (!hasRole(['admin', 'encargado'])) {
+    state.adjustmentLogs = [];
+    state.adjustmentLogsPagination = null;
+    renderAdjustmentLogs();
+    return;
+  }
+
+  const result = await api(`/api/inventario/ajuste/logs?page=${state.adjustmentLogsPage}&limit=25`);
+  state.adjustmentLogs = result.items || [];
+  state.adjustmentLogsPagination = result.pagination || null;
+  renderAdjustmentLogs();
+}
+
+function renderAdjustmentLogs() {
+  if (!els.adjustmentLogRows) return;
+
+  if (state.adjustmentLogs.length === 0) {
+    els.adjustmentLogRows.innerHTML = '<tr><td class="empty" colspan="7">Sin logs de ajuste.</td></tr>';
+  } else {
+    els.adjustmentLogRows.innerHTML = state.adjustmentLogs
+      .map((log) => `
+        <tr>
+          <td>${log.id_log}</td>
+          <td>${escapeHtml(log.descripcion)}</td>
+          <td>${escapeHtml(log.campo_modificado)}</td>
+          <td>${escapeHtml(String(log.valor_anterior ?? ''))}</td>
+          <td><strong>${escapeHtml(String(log.valor_nuevo ?? ''))}</strong></td>
+          <td>${escapeHtml(log.usuario)}</td>
+          <td>${formatDate(log.fecha)}</td>
+        </tr>`)
+      .join('');
+  }
+
+  const pagination = state.adjustmentLogsPagination || { page: 1, totalPages: 1 };
+  if (els.adjustmentLogPageInfo) {
+    els.adjustmentLogPageInfo.textContent = `Pagina ${pagination.page} de ${pagination.totalPages}`;
+  }
+  if (els.adjustmentLogPrev) els.adjustmentLogPrev.disabled = pagination.page <= 1;
+  if (els.adjustmentLogNext) els.adjustmentLogNext.disabled = pagination.page >= pagination.totalPages;
+}
+
 async function refreshAll() {
   if (!state.user) return;
-  await Promise.all([loadInventory(), loadPendingInventory(), loadOrders(), loadMovements(), loadMessages(), loadUsers(), loadReport(), loadStats()]);
+  await Promise.all([
+    loadInventory(), loadPendingInventory(), loadOrders(),
+    loadMovements(), loadMessages(), loadUsers(),
+    loadReport(), loadStats(),
+    loadAdjustmentMode(), loadAdjustmentLogs()
+  ]);
 }
 
 document.querySelectorAll('.tab').forEach((tab) => {
@@ -849,6 +1322,9 @@ els.userRows.addEventListener('click', async (event) => {
 els.inventoryForm.addEventListener('submit', async (event) => {
   event.preventDefault();
 
+  const submitBtn = els.inventoryForm.querySelector('[type="submit"]');
+  if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = 'Guardando...'; }
+
   try {
     const form = readForm(els.inventoryForm);
     const item = await api('/api/inventario', {
@@ -868,6 +1344,8 @@ els.inventoryForm.addEventListener('submit', async (event) => {
     showAlert(item.estado_revision === 'pendiente' ? 'Solicitud de alta enviada' : 'Refaccion agregada');
   } catch (error) {
     showAlert(error.message, 'error');
+  } finally {
+    if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Guardar'; }
   }
 });
 
@@ -1021,7 +1499,6 @@ els.orderRows.addEventListener('click', async (event) => {
 
 els.movementRows.addEventListener('click', async (event) => {
   const revertMovementId = event.target.dataset.revertMovement;
-  const documentMovementId = event.target.dataset.document;
 
   try {
     if (revertMovementId) {
@@ -1032,11 +1509,6 @@ els.movementRows.addEventListener('click', async (event) => {
       });
       await Promise.all([loadInventory(), loadOrders(), loadMovements(), loadMessages()]);
       showAlert('Movimiento revertido');
-    }
-
-    if (documentMovementId) {
-      const documentData = await api(`/api/movimientos/${documentMovementId}/documento`);
-      window.alert(JSON.stringify(documentData.contenido, null, 2));
     }
   } catch (error) {
     showAlert(error.message, 'error');
@@ -1072,8 +1544,32 @@ els.inventoryNext.addEventListener('click', () => {
 });
 
 document.querySelector('#refreshOrders').addEventListener('click', () => {
+  if (els.orderDateFilter) els.orderDateFilter.value = '';
+  state.ordersHistoryPage = 1;
   loadOrders().catch((error) => showAlert(error.message, 'error'));
 });
+
+if (els.orderDateFilter) {
+  els.orderDateFilter.addEventListener('change', () => {
+    state.ordersHistoryPage = 1;
+    loadOrders().catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
+if (els.orderHistoryPrev) {
+  els.orderHistoryPrev.addEventListener('click', () => {
+    const page = Math.max((state.ordersHistoryPage || 1) - 1, 1);
+    loadOrdersHistory(page).catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
+if (els.orderHistoryNext) {
+  els.orderHistoryNext.addEventListener('click', () => {
+    const totalPages = state.ordersHistoryPagination?.totalPages || 1;
+    const page = Math.min((state.ordersHistoryPage || 1) + 1, totalPages);
+    loadOrdersHistory(page).catch((error) => showAlert(error.message, 'error'));
+  });
+}
 
 document.querySelector('#refreshMovements').addEventListener('click', () => {
   loadMovements().catch((error) => showAlert(error.message, 'error'));
@@ -1167,8 +1663,290 @@ els.statsPeriod.addEventListener('change', () => {
   loadStats().catch((error) => showAlert(error.message, 'error'));
 });
 
+// Shared helper: add a blank new item row to the adjustment draft
+function addAdjustmentNewRow() {
+  if (!state.adjustmentNewItems) state.adjustmentNewItems = [];
+  state.adjustmentNewItems.push({ descripcion: '', no_parte: '', ubicacion: '', existencias: 0, minimos: 0, maximos: 0 });
+  renderAdjustmentItems();
+  // Focus the description input on the newly added row
+  const newRows = els.adjustmentRows.querySelectorAll('tr[data-new-idx]');
+  if (newRows.length > 0) {
+    const lastInput = newRows[newRows.length - 1].querySelector('input[name="descripcion"]');
+    if (lastInput) lastInput.focus();
+  }
+}
+
+// Adjustment mode: highlight modified fields
+if (els.adjustmentRows) {
+  els.adjustmentRows.addEventListener('input', (event) => {
+    const input = event.target;
+    if (!input.matches('input')) return;
+    const original = input.dataset.original || '';
+    if (input.value !== original) {
+      input.classList.add('modified');
+    } else {
+      input.classList.remove('modified');
+    }
+  });
+
+  // Delete / restore / remove-new / add row buttons (event delegation inside table)
+  els.adjustmentRows.addEventListener('click', (event) => {
+    const btn = event.target.closest('button');
+    if (!btn) return;
+
+    // Mark existing row for deletion
+    if (btn.dataset.adjDelete) {
+      const id = Number(btn.dataset.adjDelete);
+      const item = state.adjustmentItems.find(i => i.id_refaccion === id);
+      if (item) { item._marcar_eliminar = true; item.isDraft = true; }
+      renderAdjustmentItems();
+      return;
+    }
+
+    // Restore existing row
+    if (btn.dataset.adjRestore) {
+      const id = Number(btn.dataset.adjRestore);
+      const item = state.adjustmentItems.find(i => i.id_refaccion === id);
+      if (item) { item._marcar_eliminar = false; }
+      renderAdjustmentItems();
+      return;
+    }
+
+    // Remove a new item row
+    if (btn.dataset.removeNew !== undefined) {
+      const idx = Number(btn.dataset.removeNew);
+      state.adjustmentNewItems.splice(idx, 1);
+      renderAdjustmentItems();
+      return;
+    }
+  });
+}
+
+// Adjustment mode: action-bar button "+ Nueva refaccion" (outside the table)
+const addAdjustmentRowActionBtn = document.querySelector('#addAdjustmentRowAction');
+if (addAdjustmentRowActionBtn) {
+  addAdjustmentRowActionBtn.addEventListener('click', () => {
+    addAdjustmentNewRow();
+  });
+}
+
+// Adjustment mode: search filter
+if (els.adjustmentSearch) {
+  els.adjustmentSearch.addEventListener('input', () => {
+    window.clearTimeout(els.adjustmentSearch.timer);
+    els.adjustmentSearch.timer = window.setTimeout(() => {
+      renderAdjustmentItems();
+    }, 250);
+  });
+}
+
+// Adjustment mode: toggle
+if (els.toggleAdjustmentMode) {
+  els.toggleAdjustmentMode.addEventListener('click', async () => {
+    try {
+      const newState = state.adjustmentMode.estado === 'inactivo' ? 'activo' : 'inactivo';
+      const action = newState === 'activo' ? 'ACTIVAR' : 'DESACTIVAR';
+      const confirmed = window.confirm(`¿${action} el modo de ajuste general de inventario?`);
+      if (!confirmed) return;
+
+      await api('/api/inventario/ajuste/modo', {
+        method: 'PUT',
+        body: JSON.stringify({ estado: newState })
+      });
+      await loadAdjustmentMode();
+      await loadMessages();
+      showAlert(newState === 'activo' ? 'Modo de ajuste activado' : 'Modo de ajuste desactivado');
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+  });
+}
+
+async function handleSaveDraft(silent = false) {
+  const items = collectAdjustmentChanges();
+  const newItems = collectAdjustmentNewItems();
+
+  if (items.length === 0 && newItems.length === 0) {
+    if (!silent) showAlert('No hay cambios para guardar', 'error');
+    return [];
+  }
+
+  const requests = [];
+
+  if (items.length > 0) {
+    requests.push(api('/api/inventario/ajuste/borrador', {
+      method: 'POST',
+      body: JSON.stringify({ items })
+    }));
+  }
+
+  // Siempre sincronizar los nuevos (aunque sea lista vacía, reemplaza los anteriores)
+  requests.push(api('/api/inventario/ajuste/nuevos', {
+    method: 'POST',
+    body: JSON.stringify({ items: newItems })
+  }));
+
+  await Promise.all(requests);
+
+  if (!silent) {
+    const parts = [];
+    if (items.length > 0) parts.push(`${items.length} edicion(es)/baja(s)`);
+    if (newItems.length > 0) parts.push(`${newItems.length} nueva(s)`);
+    showAlert(`Progreso guardado: ${parts.join(', ')}`);
+    await loadAdjustmentItems();
+  }
+  return items;
+}
+
+// Adjustment mode: save draft
+if (els.saveAdjustmentDraft) {
+  els.saveAdjustmentDraft.addEventListener('click', async () => {
+    try {
+      await handleSaveDraft();
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+  });
+}
+
+// Adjustment mode: send to review
+if (els.sendAdjustmentReview) {
+  els.sendAdjustmentReview.addEventListener('click', async () => {
+    try {
+      const confirmed = window.confirm('¿Enviar el borrador a revisión? Ya no podrás editarlo hasta que el administrador lo apruebe o rechace.');
+      if (!confirmed) return;
+
+      await handleSaveDraft(true);
+      
+      await api('/api/inventario/ajuste/modo', {
+        method: 'PUT',
+        body: JSON.stringify({ estado: 'en_revision' })
+      });
+      
+      showAlert('Borrador enviado a revisión exitosamente', 'success');
+      await Promise.all([loadAdjustmentMode(), loadMessages()]);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+  });
+}
+
+// Adjustment mode: approve
+if (els.approveAdjustment) {
+  els.approveAdjustment.addEventListener('click', async () => {
+    try {
+      const confirmed = window.confirm('¿Estás seguro de APROBAR y APLICAR todos los cambios del borrador al inventario real?');
+      if (!confirmed) return;
+
+      const result = await api('/api/inventario/ajuste/aprobar', { method: 'POST' });
+      const resumen = [
+        result.ediciones > 0 ? `${result.ediciones} edicion(es)` : null,
+        result.eliminados > 0 ? `${result.eliminados} baja(s)` : null,
+        result.agregados  > 0 ? `${result.agregados} alta(s)` : null
+      ].filter(Boolean).join(', ') || '0 cambios';
+      showAlert(`Ajuste aplicado: ${resumen}`);
+      await Promise.all([loadAdjustmentMode(), loadAdjustmentLogs(), loadInventory(), loadMessages()]);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+  });
+}
+
+// Adjustment mode: reject/reopen
+if (els.rejectAdjustment) {
+  els.rejectAdjustment.addEventListener('click', async () => {
+    try {
+      const confirmed = window.confirm('¿Rechazar el borrador y devolver los cambios? Esto descartará todo el progreso del encargado.');
+      if (!confirmed) return;
+
+      await api('/api/inventario/ajuste/rechazar', {
+        method: 'POST'
+      });
+      
+      showAlert('Borrador rechazado y descartado');
+      await Promise.all([loadAdjustmentMode(), loadMessages()]);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+  });
+}
+
+// Adjustment mode: refresh
+if (els.refreshAdjustmentMode) {
+  els.refreshAdjustmentMode.addEventListener('click', () => {
+    loadAdjustmentMode().catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
+// Adjustment logs: refresh
+if (els.refreshAdjustmentLogs) {
+  els.refreshAdjustmentLogs.addEventListener('click', () => {
+    state.adjustmentLogsPage = 1;
+    loadAdjustmentLogs().catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
+// Adjustment logs: pagination
+if (els.adjustmentLogPrev) {
+  els.adjustmentLogPrev.addEventListener('click', () => {
+    state.adjustmentLogsPage = Math.max(state.adjustmentLogsPage - 1, 1);
+    loadAdjustmentLogs().catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
+if (els.adjustmentLogNext) {
+  els.adjustmentLogNext.addEventListener('click', () => {
+    const totalPages = state.adjustmentLogsPagination?.totalPages || 1;
+    state.adjustmentLogsPage = Math.min(state.adjustmentLogsPage + 1, totalPages);
+    loadAdjustmentLogs().catch((error) => showAlert(error.message, 'error'));
+  });
+}
+
 addDetailRow();
 syncOrderTypeFields();
 loadSession()
   .then(refreshAll)
   .catch((error) => showAlert(error.message, 'error'));
+
+// ── Handler del modal de cambio obligatorio de contraseña ──
+els.changePasswordForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const cpAlert = els.cpAlert;
+  const nuevaPassword = document.querySelector('#cpNewPassword').value;
+  const confirmarPassword = document.querySelector('#cpConfirmPassword').value;
+
+  cpAlert.hidden = true;
+
+  if (nuevaPassword !== confirmarPassword) {
+    cpAlert.textContent = 'Las contraseñas no coinciden';
+    cpAlert.className = 'alert error';
+    cpAlert.hidden = false;
+    return;
+  }
+
+  const submitBtn = document.querySelector('#cpSubmit');
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Guardando...';
+
+  try {
+    await api('/api/usuarios/cambiar-password', {
+      method: 'POST',
+      body: JSON.stringify({ nueva_password: nuevaPassword })
+    });
+
+    // Actualizar flag en estado local
+    state.user.debe_cambiar_password = false;
+    els.changePasswordOverlay.hidden = true;
+    els.changePasswordForm.reset();
+    showAlert('Contraseña actualizada correctamente');
+    await refreshAll();
+  } catch (error) {
+    cpAlert.textContent = error.message;
+    cpAlert.className = 'alert error';
+    cpAlert.hidden = false;
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = 'Establecer contraseña';
+  }
+});

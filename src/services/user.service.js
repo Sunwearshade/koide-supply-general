@@ -14,7 +14,8 @@ function publicUser(user) {
     username: user.username,
     rol: user.rol,
     role: user.rol,
-    activo: user.activo
+    activo: user.activo,
+    debe_cambiar_password: Number(user.debe_cambiar_password) === 1
   };
 }
 
@@ -115,8 +116,8 @@ async function createUser({ nombre, username, password, rol }, actor = null) {
 
   const passwordHash = await bcrypt.hash(password, 10);
   const [result] = await pool.execute(
-    `INSERT INTO usuarios (nombre, username, password_hash, rol)
-     VALUES (:nombre, :username, :passwordHash, :rol)`,
+    `INSERT INTO usuarios (nombre, username, password_hash, rol, debe_cambiar_password)
+     VALUES (:nombre, :username, :passwordHash, :rol, 1)`,
     { nombre, username, passwordHash, rol }
   );
 
@@ -125,7 +126,8 @@ async function createUser({ nombre, username, password, rol }, actor = null) {
     nombre,
     username,
     rol,
-    activo: 1
+    activo: 1,
+    debe_cambiar_password: 1
   });
 }
 
@@ -222,7 +224,7 @@ async function login({ username, password }) {
   }
 
   const [rows] = await pool.execute(
-    `SELECT id_usuario, nombre, username, password_hash, rol, activo
+    `SELECT id_usuario, nombre, username, password_hash, rol, activo, debe_cambiar_password
      FROM usuarios
      WHERE username = :username
      LIMIT 1`,
@@ -248,8 +250,25 @@ async function login({ username, password }) {
     nombre: user.nombre,
     username: user.username,
     rol: user.rol,
-    activo: user.activo
+    activo: user.activo,
+    debe_cambiar_password: user.debe_cambiar_password
   });
+}
+
+async function cambiarPassword(idUsuario, { nueva_password }) {
+  if (!nueva_password || nueva_password.trim().length < 6) {
+    const error = new Error('La nueva contrasena debe tener al menos 6 caracteres');
+    error.status = 400;
+    throw error;
+  }
+
+  const passwordHash = await bcrypt.hash(nueva_password, 10);
+  await pool.execute(
+    `UPDATE usuarios
+     SET password_hash = :passwordHash, debe_cambiar_password = 0
+     WHERE id_usuario = :idUsuario`,
+    { passwordHash, idUsuario }
+  );
 }
 
 module.exports = {
@@ -259,5 +278,6 @@ module.exports = {
   updateUser,
   deactivateUser,
   activateUser,
-  login
+  login,
+  cambiarPassword
 };

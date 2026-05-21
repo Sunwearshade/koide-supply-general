@@ -54,6 +54,14 @@ async function login(req, res) {
   res.json({ user });
 }
 
+async function cambiarPassword(req, res) {
+  const idUsuario = req.session.user.id_usuario;
+  await userService.cambiarPassword(idUsuario, req.body);
+  // Limpiar el flag en la sesion activa
+  req.session.user.debe_cambiar_password = false;
+  res.json({ ok: true });
+}
+
 async function me(req, res) {
   res.json({ user: req.session.user || null });
 }
@@ -72,5 +80,6 @@ module.exports = {
   activateUser,
   login,
   me,
-  logout
+  logout,
+  cambiarPassword
 };

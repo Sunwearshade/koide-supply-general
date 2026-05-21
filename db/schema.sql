@@ -8,6 +8,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
   password_hash varchar(255) NOT NULL,
   rol enum('admin','encargado','operador') NOT NULL,
   activo tinyint(1) DEFAULT '1',
+  debe_cambiar_password tinyint(1) NOT NULL DEFAULT '0',
   created_at datetime DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (id_usuario),
   UNIQUE KEY username (username)
@@ -107,4 +108,61 @@ CREATE TABLE IF NOT EXISTS documentos_movimiento (
   PRIMARY KEY (id_documento),
   KEY id_movimiento (id_movimiento),
   CONSTRAINT documentos_movimiento_ibfk_1 FOREIGN KEY (id_movimiento) REFERENCES movimientos (id_movimiento)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS configuracion_sistema (
+  clave varchar(100) NOT NULL,
+  valor varchar(500) DEFAULT NULL,
+  updated_at datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  updated_by int DEFAULT NULL,
+  PRIMARY KEY (clave),
+  KEY updated_by (updated_by),
+  CONSTRAINT configuracion_sistema_ibfk_1 FOREIGN KEY (updated_by) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+INSERT IGNORE INTO configuracion_sistema (clave, valor) VALUES ('modo_ajuste_inventario', 'off');
+
+CREATE TABLE IF NOT EXISTS log_ajuste_inventario (
+  id_log int NOT NULL AUTO_INCREMENT,
+  id_item int NOT NULL,
+  campo_modificado varchar(50) NOT NULL,
+  valor_anterior varchar(255) DEFAULT NULL,
+  valor_nuevo varchar(255) DEFAULT NULL,
+  id_usuario int NOT NULL,
+  fecha datetime DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_log),
+  KEY log_ajuste_inv_item (id_item),
+  KEY log_ajuste_inv_usuario (id_usuario),
+  CONSTRAINT log_ajuste_inv_ibfk_2 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ajuste_inventario_borrador (
+  id_item int NOT NULL,
+  descripcion varchar(255) DEFAULT NULL,
+  no_parte varchar(100) DEFAULT NULL,
+  ubicacion varchar(50) DEFAULT NULL,
+  existencias int DEFAULT NULL,
+  minimos int DEFAULT NULL,
+  maximos int DEFAULT NULL,
+  marcar_eliminar tinyint(1) NOT NULL DEFAULT '0',
+  id_usuario int NOT NULL,
+  fecha datetime DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_item),
+  KEY id_usuario (id_usuario),
+  CONSTRAINT ajuste_borrador_ibfk_2 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS ajuste_inventario_nuevos (
+  id_nuevo    int          NOT NULL AUTO_INCREMENT,
+  descripcion varchar(255) NOT NULL,
+  no_parte    varchar(100) DEFAULT NULL,
+  ubicacion   varchar(50)  DEFAULT NULL,
+  existencias int          DEFAULT 0,
+  minimos     int          DEFAULT 0,
+  maximos     int          DEFAULT 0,
+  id_usuario  int          NOT NULL,
+  fecha       datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (id_nuevo),
+  KEY id_usuario (id_usuario),
+  CONSTRAINT ajuste_nuevos_ibfk_1 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
