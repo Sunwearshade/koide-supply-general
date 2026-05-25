@@ -1139,10 +1139,10 @@ async function loadAdjustmentItems() {
   }
 
   const draftMap = new Map();
-  drafts.forEach(d => draftMap.set(d.id_refaccion, d));
+  drafts.forEach(d => draftMap.set(Number(d.id_refaccion), d));
 
   state.adjustmentItems = allItems.map(item => {
-    const draft = draftMap.get(item.id_refaccion);
+    const draft = draftMap.get(Number(item.id_refaccion));
     if (draft) {
       if (Number(draft.marcar_eliminar) === 1) {
         return { ...item, _marcar_eliminar: true, isDraft: true };
@@ -2066,7 +2066,7 @@ if (els.adjustmentRows) {
     // Mark existing row for deletion
     if (btn.dataset.adjDelete) {
       const id = Number(btn.dataset.adjDelete);
-      const item = state.adjustmentItems.find(i => i.id_refaccion === id);
+      const item = state.adjustmentItems.find(i => Number(i.id_refaccion) === id);
       if (item) { item._marcar_eliminar = true; item.isDraft = true; }
       renderAdjustmentItems();
       return;
@@ -2075,7 +2075,7 @@ if (els.adjustmentRows) {
     // Restore existing row
     if (btn.dataset.adjRestore) {
       const id = Number(btn.dataset.adjRestore);
-      const item = state.adjustmentItems.find(i => i.id_refaccion === id);
+      const item = state.adjustmentItems.find(i => Number(i.id_refaccion) === id);
       if (item) { item._marcar_eliminar = false; }
       renderAdjustmentItems();
       return;
