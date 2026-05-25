@@ -367,6 +367,40 @@ tr:last-child td {
   width: min(240px, 100%);
 }
 
+.image-path {
+  display: inline-block;
+  max-width: 220px;
+  overflow-wrap: anywhere;
+}
+
+.image-upload {
+  display: grid;
+  gap: 6px;
+  min-width: 220px;
+}
+
+.image-upload input[type="file"] {
+  min-height: auto;
+  padding: 6px;
+  font-size: 12px;
+}
+
+.image-upload button {
+  min-height: 32px;
+  padding: 0 10px;
+  font-size: 12px;
+}
+
+.image-replace-input {
+  display: none;
+}
+
+.image-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
 .date-filter-label {
   display: flex;
   align-items: center;
@@ -511,7 +545,7 @@ tr:last-child td {
 }
 
 #adjustmentEditSection table {
-  min-width: 900px;
+  min-width: 1080px;
 }
 
 #adjustmentEditSection td input {

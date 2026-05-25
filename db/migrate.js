@@ -56,6 +56,53 @@ async function addForeignKeyIfMissing(connection, constraintName, sql) {
   await connection.query(sql);
 }
 
+async function renameColumnIfNeeded(connection, tableName, oldColumnName, newColumnName, definition) {
+  const hasOldColumn = await columnExists(connection, tableName, oldColumnName);
+  const hasNewColumn = await columnExists(connection, tableName, newColumnName);
+
+  if (hasOldColumn && !hasNewColumn) {
+    await connection.query(`ALTER TABLE ${tableName} CHANGE COLUMN ${oldColumnName} ${newColumnName} ${definition}`);
+  }
+}
+
+async function ensureInventoryIdAutoIncrement(connection) {
+  const [columns] = await connection.execute(`SHOW COLUMNS FROM inventario`);
+  const idRefaccion = columns.find((column) => column.Field === 'id_refaccion');
+  const autoColumn = columns.find((column) => String(column.Extra || '').includes('auto_increment'));
+
+  if (idRefaccion && String(idRefaccion.Extra || '').includes('auto_increment')) {
+    return;
+  }
+
+  if (autoColumn && autoColumn.Field !== 'id_refaccion') {
+    if (columns.some((column) => column.Field === 'id')) {
+      await connection.query(`
+        UPDATE inventario
+        SET id_refaccion = id
+        WHERE id_refaccion IS NULL OR id_refaccion = 0
+      `);
+      await addIndexIfMissing(connection, 'inventario', 'idx_inventario_id_refaccion', '(id_refaccion)');
+    }
+    return;
+  }
+
+  await connection.query(`
+    ALTER TABLE inventario
+    MODIFY COLUMN id_refaccion int NOT NULL AUTO_INCREMENT
+  `);
+}
+
+async function copyLegacyImageItemColumn(connection) {
+  const hasSpacedColumn = await columnExists(connection, 'inventario', 'imagen item');
+  const hasCurrentColumn = await columnExists(connection, 'inventario', 'imagen_item');
+  if (!hasSpacedColumn || !hasCurrentColumn) return;
+
+  await connection.query(`
+    UPDATE inventario
+    SET imagen_item = COALESCE(imagen_item, \`imagen item\`)
+  `);
+}
+
 async function migrate() {
   const connection = await pool.getConnection();
 
@@ -80,6 +127,10 @@ async function migrate() {
     await addColumnIfMissing(connection, 'inventario', 'id_solicitante_alta', 'int DEFAULT NULL');
     await addColumnIfMissing(connection, 'inventario', 'id_aprobador_alta', 'int DEFAULT NULL');
     await addColumnIfMissing(connection, 'inventario', 'fecha_revision', 'datetime DEFAULT NULL');
+    await renameColumnIfNeeded(connection, 'inventario', 'imagen_path', 'imagen_item', 'varchar(255) DEFAULT NULL');
+    await addColumnIfMissing(connection, 'inventario', 'imagen_item', 'varchar(255) DEFAULT NULL');
+    await copyLegacyImageItemColumn(connection);
+    await ensureInventoryIdAutoIncrement(connection);
     await addIndexIfMissing(connection, 'inventario', 'id_solicitante_alta', '(id_solicitante_alta)');
     await addIndexIfMissing(connection, 'inventario', 'id_aprobador_alta', '(id_aprobador_alta)');
     await addForeignKeyIfMissing(
@@ -206,6 +257,7 @@ async function migrate() {
         existencias int          DEFAULT 0,
         minimos     int          DEFAULT 0,
         maximos     int          DEFAULT 0,
+        imagen_item varchar(255) DEFAULT NULL,
         id_usuario  int          NOT NULL,
         fecha       datetime     DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (id_nuevo),
@@ -213,13 +265,7 @@ async function migrate() {
         CONSTRAINT ajuste_nuevos_ibfk_1 FOREIGN KEY (id_usuario) REFERENCES usuarios (id_usuario)
       ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`
     );
-
-    // Sincronizar id_refaccion = id para filas donde id_refaccion sea 0 o NULL.
-    await connection.query(`
-      UPDATE inventario
-      SET id_refaccion = id
-      WHERE id_refaccion IS NULL OR id_refaccion = 0
-    `);
+    await addColumnIfMissing(connection, 'ajuste_inventario_nuevos', 'imagen_item', 'varchar(255) DEFAULT NULL');
 
     console.log('Migracion completada');
   } finally {

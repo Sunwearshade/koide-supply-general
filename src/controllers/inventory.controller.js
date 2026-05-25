@@ -75,6 +75,26 @@ async function deleteInventoryItem(req, res) {
   res.json(result);
 }
 
+async function uploadInventoryImage(req, res) {
+  const item = await inventoryService.uploadInventoryImage(req.params.id, req.body || {});
+  await createSystemMessage({
+    type: 'inventario_imagen',
+    message: `${req.session.user.nombre} cargo imagen para la refaccion ${item.descripcion}`,
+    userId: req.session.user.id_usuario
+  });
+  res.json(item);
+}
+
+async function deleteInventoryImage(req, res) {
+  const item = await inventoryService.deleteInventoryImage(req.params.id);
+  await createSystemMessage({
+    type: 'inventario_imagen_eliminada',
+    message: `${req.session.user.nombre} elimino imagen de la refaccion ${item.descripcion}`,
+    userId: req.session.user.id_usuario
+  });
+  res.json(item);
+}
+
 async function getAdjustmentMode(req, res) {
   const mode = await configService.getAdjustmentMode();
   res.json(mode);
@@ -130,6 +150,26 @@ async function getAdjustmentNewItems(req, res) {
   res.json(items);
 }
 
+async function uploadAdjustmentNewItemImage(req, res) {
+  const item = await inventoryService.uploadAdjustmentNewItemImage(req.params.id, req.body || {}, req.session.user);
+  await createSystemMessage({
+    type: 'ajuste_alta_imagen',
+    message: `${req.session.user.nombre} cargo imagen para alta nueva ${item.descripcion}`,
+    userId: req.session.user.id_usuario
+  });
+  res.json(item);
+}
+
+async function deleteAdjustmentNewItemImage(req, res) {
+  const item = await inventoryService.deleteAdjustmentNewItemImage(req.params.id, req.session.user);
+  await createSystemMessage({
+    type: 'ajuste_alta_imagen_eliminada',
+    message: `${req.session.user.nombre} elimino imagen de alta nueva ${item.descripcion}`,
+    userId: req.session.user.id_usuario
+  });
+  res.json(item);
+}
+
 async function approveAdjustmentDraft(req, res) {
   const result = await inventoryService.approveAdjustmentDraft(req.session.user);
   res.json(result);
@@ -158,12 +198,16 @@ module.exports = {
   rejectInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
+  uploadInventoryImage,
+  deleteInventoryImage,
   getAdjustmentMode,
   setAdjustmentMode,
   saveAdjustmentDraft,
   getAdjustmentDraft,
   saveAdjustmentNewItems,
   getAdjustmentNewItems,
+  uploadAdjustmentNewItemImage,
+  deleteAdjustmentNewItemImage,
   approveAdjustmentDraft,
   rejectAdjustmentDraft,
   getAdjustmentLogs

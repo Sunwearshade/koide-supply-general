@@ -160,6 +160,181 @@ function badge(value) {
   return `<span class="badge ${value}">${value}</span>`;
 }
 
+function imagePathCell(item) {
+  if (!item.imagen_item) return '<span class="empty">Sin imagen</span>';
+  const path = escapeHtml(item.imagen_item);
+  const extension = String(item.imagen_item).split('.').pop() || 'jpg';
+  const label = `${item.descripcion || 'imagen'}.${extension}`;
+  return `<a class="image-path" href="${path}" target="_blank" rel="noopener">${escapeHtml(label)}</a>`;
+}
+
+function imageUploadCell(item) {
+  if (item.imagen_item) {
+    return `
+      <div class="image-upload">
+        ${imagePathCell(item)}
+        <input class="image-replace-input" type="file" accept="image/*" data-image-file="${item.id_refaccion}" data-auto-upload="1" aria-label="Reemplazar imagen de ${escapeHtml(item.descripcion)}">
+        <div class="image-actions">
+          <button type="button" class="secondary" data-edit-image="${item.id_refaccion}">Editar</button>
+          <button type="button" class="danger" data-delete-image="${item.id_refaccion}">Eliminar</button>
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="image-upload">
+      <span class="empty">Sin imagen</span>
+      <input type="file" accept="image/*" data-image-file="${item.id_refaccion}" aria-label="Imagen de ${escapeHtml(item.descripcion)}">
+      <button type="button" class="secondary" data-upload-image="${item.id_refaccion}">Subir / cargar</button>
+    </div>
+  `;
+}
+
+function adjustmentNewImageCell() {
+  return '<span class="empty">Guarda progreso para cargar imagen</span>';
+}
+
+function adjustmentNewImageUploadCell(item, idx) {
+  if (item.imagen_item) {
+    return `
+      <div class="image-upload">
+        ${imagePathCell(item)}
+        <input class="image-replace-input" type="file" accept="image/*" data-new-image-file="${item.id_nuevo}" data-new-auto-upload="1" aria-label="Reemplazar imagen de ${escapeHtml(item.descripcion)}">
+        <div class="image-actions">
+          <button type="button" class="secondary" data-edit-new-image="${item.id_nuevo}">Editar</button>
+          <button type="button" class="danger" data-delete-new-image="${item.id_nuevo}">Eliminar</button>
+        </div>
+      </div>
+    `;
+  }
+
+  if (!item.id_nuevo) {
+    return `
+      <div class="image-upload">
+        <span class="empty">Sin imagen</span>
+        <input type="file" accept="image/*" data-new-draft-image-file="${idx}" aria-label="Imagen de ${escapeHtml(item.descripcion || `alta nueva ${idx + 1}`)}">
+        <button type="button" class="secondary" data-upload-new-draft-image="${idx}">Subir / cargar</button>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="image-upload">
+      <span class="empty">Sin imagen</span>
+      <input type="file" accept="image/*" data-new-image-file="${item.id_nuevo}" aria-label="Imagen de ${escapeHtml(item.descripcion || `alta nueva ${idx + 1}`)}">
+      <button type="button" class="secondary" data-upload-new-image="${item.id_nuevo}">Subir / cargar</button>
+    </div>
+  `;
+}
+
+function fileToDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.addEventListener('load', () => resolve(reader.result));
+    reader.addEventListener('error', () => reject(new Error('No se pudo leer la imagen')));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function uploadInventoryImage(idRefaccion, file, description = '') {
+  const dataUrl = await fileToDataUrl(file);
+  return api(`/api/inventario/${idRefaccion}/imagen`, {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name,
+      description,
+      mimeType: file.type,
+      dataUrl
+    })
+  });
+}
+
+async function deleteInventoryImage(idRefaccion) {
+  return api(`/api/inventario/${idRefaccion}/imagen`, { method: 'DELETE' });
+}
+
+async function uploadAdjustmentNewImage(idNuevo, file, description = '') {
+  const dataUrl = await fileToDataUrl(file);
+  return api(`/api/inventario/ajuste/nuevos/${idNuevo}/imagen`, {
+    method: 'POST',
+    body: JSON.stringify({
+      fileName: file.name,
+      description,
+      mimeType: file.type,
+      dataUrl
+    })
+  });
+}
+
+async function deleteAdjustmentNewImage(idNuevo) {
+  return api(`/api/inventario/ajuste/nuevos/${idNuevo}/imagen`, { method: 'DELETE' });
+}
+
+function getAdjustmentImageDescription(idRefaccion, sourceElement) {
+  const row = sourceElement.closest('tr');
+  return row?.querySelector('input[name="descripcion"]')?.value?.trim()
+    || state.adjustmentItems.find((item) => Number(item.id_refaccion) === Number(idRefaccion))?.descripcion
+    || '';
+}
+
+async function handleAdjustmentImageUpload(idRefaccion, file, sourceElement) {
+  if (!file) {
+    showAlert('Selecciona una imagen para cargar', 'error');
+    return;
+  }
+
+  const description = getAdjustmentImageDescription(idRefaccion, sourceElement);
+  await uploadInventoryImage(idRefaccion, file, description);
+  await Promise.all([loadInventory(), loadAdjustmentItems(), loadPendingInventory(), loadMessages()]);
+  showAlert('Imagen cargada');
+}
+
+function getAdjustmentNewImageDescription(idNuevo, sourceElement) {
+  const row = sourceElement.closest('tr');
+  return row?.querySelector('input[name="descripcion"]')?.value?.trim()
+    || state.adjustmentNewItems.find((item) => Number(item.id_nuevo) === Number(idNuevo))?.descripcion
+    || '';
+}
+
+async function handleAdjustmentNewImageUpload(idNuevo, file, sourceElement) {
+  if (!file) {
+    showAlert('Selecciona una imagen para cargar', 'error');
+    return;
+  }
+
+  const description = getAdjustmentNewImageDescription(idNuevo, sourceElement);
+  await uploadAdjustmentNewImage(idNuevo, file, description);
+  await Promise.all([loadAdjustmentItems(), loadMessages()]);
+  showAlert('Imagen cargada');
+}
+
+async function persistAdjustmentNewRowForImage(rowIndex) {
+  const rows = [...els.adjustmentRows.querySelectorAll('tr[data-new-idx]')];
+  const row = rows[rowIndex];
+  const description = row?.querySelector('input[name="descripcion"]')?.value?.trim();
+
+  if (!description) {
+    const error = new Error('Captura la descripcion antes de cargar imagen');
+    error.status = 400;
+    throw error;
+  }
+
+  const newItems = collectAdjustmentNewItems();
+  await api('/api/inventario/ajuste/nuevos', {
+    method: 'POST',
+    body: JSON.stringify({ items: newItems })
+  });
+  await loadAdjustmentItems();
+
+  const saved = state.adjustmentNewItems[rowIndex];
+  if (!saved?.id_nuevo) {
+    throw new Error('No se pudo preparar la alta nueva para cargar imagen');
+  }
+
+  return saved.id_nuevo;
+}
+
 function readForm(form) {
   return Object.fromEntries(new FormData(form).entries());
 }
@@ -232,7 +407,7 @@ function renderSession() {
 
 function renderInventory() {
   if (state.inventory.length === 0) {
-    els.inventoryRows.innerHTML = '<tr><td class="empty" colspan="7">Sin refacciones registradas.</td></tr>';
+    els.inventoryRows.innerHTML = '<tr><td class="empty" colspan="9">Sin refacciones registradas.</td></tr>';
     els.inventoryPageInfo.textContent = 'Pagina 1 de 1';
     return;
   }
@@ -248,6 +423,8 @@ function renderInventory() {
           <td><strong>${item.existencias}</strong></td>
           <td>${item.minimos}</td>
           <td>${item.maximos}</td>
+          <td>${imagePathCell(item)}</td>
+          <td><button type="button" class="secondary" data-generate-order="${item.id_refaccion}">Generar orden</button></td>
         </tr>
       `
     )
@@ -274,7 +451,7 @@ function renderPendingInventory() {
   }
 
   if (state.pendingInventory.length === 0) {
-    els.pendingInventoryRows.innerHTML = '<tr><td class="empty" colspan="7">Sin altas pendientes.</td></tr>';
+    els.pendingInventoryRows.innerHTML = '<tr><td class="empty" colspan="8">Sin altas pendientes.</td></tr>';
     return;
   }
 
@@ -288,6 +465,7 @@ function renderPendingInventory() {
           <td>${escapeHtml(item.descripcion)}</td>
           <td>${escapeHtml(item.no_parte)}</td>
           <td>${escapeHtml(item.ubicacion)}</td>
+          <td>${imagePathCell(item)}</td>
           <td>${escapeHtml(item.solicitante_alta)}</td>
           <td>${formatDate(item.created_at)}</td>
           <td>
@@ -648,6 +826,29 @@ function addDetailRow() {
   els.detailRows.appendChild(node);
 }
 
+async function openOrderForInventoryItem(idRefaccion) {
+  const item = await api(`/api/inventario/${idRefaccion}`);
+  const orderTab = document.querySelector('.tab[data-tab="ordenes"]');
+  if (orderTab) orderTab.click();
+
+  els.detailRows.innerHTML = '';
+  addDetailRow();
+  const row = els.detailRows.querySelector('.detail-row');
+  setDetailOptions(row, [item], item.id_refaccion);
+  row.querySelector('.part-search').value = optionLabel(item);
+  row.querySelector('[name="cantidad"]').focus();
+  window.scrollTo({ top: els.orderForm.offsetTop - 20, behavior: 'smooth' });
+}
+
+function removeBlankDetailRows() {
+  const rows = [...els.detailRows.querySelectorAll('.detail-row')];
+  rows.forEach((row) => {
+    const selected = row.querySelector('[name="id_refaccion"]').value;
+    const search = row.querySelector('.part-search').value.trim();
+    if (!selected && !search && rows.length > 1) row.remove();
+  });
+}
+
 function exportMissingItems(items, fileLabel) {
   if (items.length === 0) {
     showAlert('Selecciona al menos un faltante', 'error');
@@ -1005,7 +1206,7 @@ function renderAdjustmentItems() {
         return `
           <tr data-adj-id="${item.id_refaccion}" class="${rowClass}">
             <td class="id-cell">${item.id_refaccion}</td>
-            <td colspan="6" class="adj-delete-label">❌ ${escapeHtml(item.descripcion)} — marcada para <strong>eliminar</strong></td>
+            <td colspan="7" class="adj-delete-label">❌ ${escapeHtml(item.descripcion)} — marcada para <strong>eliminar</strong></td>
             <td>${deleteBtn}</td>
           </tr>`;
       }
@@ -1019,13 +1220,14 @@ function renderAdjustmentItems() {
           <td><input type="number" name="existencias" min="0" value="${item.existencias}" data-original="${getOriginal('existencias')}" class="${isModified('existencias') ? 'modified' : ''}"></td>
           <td><input type="number" name="minimos" min="0" value="${item.minimos}" data-original="${getOriginal('minimos')}" class="${isModified('minimos') ? 'modified' : ''}"></td>
           <td><input type="number" name="maximos" min="0" value="${item.maximos}" data-original="${getOriginal('maximos')}" class="${isModified('maximos') ? 'modified' : ''}"></td>
+          <td>${imageUploadCell(item)}</td>
           <td>${deleteBtn}</td>
         </tr>`;
     });
 
     // Filas nuevas en edición
     const newRows = (state.adjustmentNewItems || []).map((item, idx) => `
-      <tr data-new-idx="${idx}" class="adj-row-new">
+      <tr data-new-idx="${idx}" data-new-id="${item.id_nuevo || ''}" class="adj-row-new">
         <td class="id-cell">+</td>
         <td><input type="text" name="descripcion" value="${escapeHtml(item.descripcion || '')}" placeholder="Descripcion *"></td>
         <td><input type="text" name="no_parte" value="${escapeHtml(item.no_parte || '')}" placeholder="No. parte"></td>
@@ -1033,15 +1235,16 @@ function renderAdjustmentItems() {
         <td><input type="number" name="existencias" min="0" value="${item.existencias || 0}"></td>
         <td><input type="number" name="minimos" min="0" value="${item.minimos || 0}"></td>
         <td><input type="number" name="maximos" min="0" value="${item.maximos || 0}"></td>
+        <td>${adjustmentNewImageUploadCell(item, idx)}</td>
         <td><button type="button" class="adj-btn-delete" data-remove-new="${idx}">✕</button></td>
       </tr>`);
 
     // Fila separadora al final (sin el botón, que ahora está en la barra de acciones)
     const addRow = `
-      <tr class="adj-row-add-btn" id="adj-add-row-placeholder"><td colspan="8"></td></tr>`;
+      <tr class="adj-row-add-btn" id="adj-add-row-placeholder"><td colspan="9"></td></tr>`;
 
     if (items.length === 0 && (state.adjustmentNewItems || []).length === 0) {
-      els.adjustmentRows.innerHTML = `<tr><td class="empty" colspan="8">Sin items. Usa el boton de arriba para agregar una nueva refaccion.</td></tr>${addRow}`;
+      els.adjustmentRows.innerHTML = `<tr><td class="empty" colspan="9">Sin items. Usa el boton de arriba para agregar una nueva refaccion.</td></tr>${addRow}`;
     } else {
       els.adjustmentRows.innerHTML = existingRows.join('') + newRows.join('') + addRow;
     }
@@ -1066,6 +1269,7 @@ function renderAdjustmentItems() {
           <td class="${isModified('existencias') ? 'adj-modified-cell' : ''}">${item.existencias}</td>
           <td class="${isModified('minimos') ? 'adj-modified-cell' : ''}">${item.minimos}</td>
           <td class="${isModified('maximos') ? 'adj-modified-cell' : ''}">${item.maximos}</td>
+          <td>${imagePathCell(item)}</td>
           <td>✏️</td>
         </tr>`;
     };
@@ -1073,7 +1277,7 @@ function renderAdjustmentItems() {
     const renderDeletion = (item) => `
       <tr class="adj-row-delete">
         <td class="id-cell">${item.id_refaccion}</td>
-        <td colspan="6">${escapeHtml(item.descripcion)}</td>
+        <td colspan="7">${escapeHtml(item.descripcion)}</td>
         <td>🗑</td>
       </tr>`;
 
@@ -1086,21 +1290,22 @@ function renderAdjustmentItems() {
         <td>${item.existencias || 0}</td>
         <td>${item.minimos || 0}</td>
         <td>${item.maximos || 0}</td>
+        <td>${imagePathCell(item)}</td>
         <td>➕</td>
       </tr>`;
 
     let html = '';
-    if (edits.length > 0) html += `<tr class="adj-section-header"><td colspan="8">✏️ Ediciones (${edits.length})</td></tr>` + edits.map(renderEdit).join('');
-    if (deletions.length > 0) html += `<tr class="adj-section-header adj-section-delete"><td colspan="8">🗑 Bajas (${deletions.length})</td></tr>` + deletions.map(renderDeletion).join('');
-    if (newItems.length > 0) html += `<tr class="adj-section-header adj-section-new"><td colspan="8">➕ Altas (${newItems.length})</td></tr>` + newItems.map(renderNew).join('');
-    if (!html) html = '<tr><td class="empty" colspan="8">Sin cambios en el borrador.</td></tr>';
+    if (edits.length > 0) html += `<tr class="adj-section-header"><td colspan="9">✏️ Ediciones (${edits.length})</td></tr>` + edits.map(renderEdit).join('');
+    if (deletions.length > 0) html += `<tr class="adj-section-header adj-section-delete"><td colspan="9">🗑 Bajas (${deletions.length})</td></tr>` + deletions.map(renderDeletion).join('');
+    if (newItems.length > 0) html += `<tr class="adj-section-header adj-section-new"><td colspan="9">➕ Altas (${newItems.length})</td></tr>` + newItems.map(renderNew).join('');
+    if (!html) html = '<tr><td class="empty" colspan="9">Sin cambios en el borrador.</td></tr>';
 
     els.adjustmentRows.innerHTML = html;
     return;
   }
 
   // Fallback sin modo activo
-  els.adjustmentRows.innerHTML = '<tr><td class="empty" colspan="8">Modo de ajuste inactivo.</td></tr>';
+  els.adjustmentRows.innerHTML = '<tr><td class="empty" colspan="9">Modo de ajuste inactivo.</td></tr>';
 }
 
 function collectAdjustmentChanges() {
@@ -1121,6 +1326,7 @@ function collectAdjustmentChanges() {
     let hasChange = false;
 
     inputs.forEach((input) => {
+      if (!input.name || input.type === 'file') return;
       const original = input.dataset.original || '';
       const current = input.value;
       if (current !== original) {
@@ -1141,7 +1347,9 @@ function collectAdjustmentNewItems() {
   rows.forEach((row) => {
     const inputs = row.querySelectorAll('input');
     const item = {};
+    if (row.dataset.newId) item.id_nuevo = Number(row.dataset.newId);
     inputs.forEach(input => {
+      if (!input.name || input.type === 'file') return;
       item[input.name] = input.type === 'number' ? Number(input.value) : input.value;
     });
     if (item.descripcion && item.descripcion.trim()) items.push(item);
@@ -1374,6 +1582,164 @@ els.pendingInventoryRows.addEventListener('click', async (event) => {
   }
 });
 
+els.inventoryRows.addEventListener('click', async (event) => {
+  const generateOrderId = event.target.dataset.generateOrder;
+  if (!generateOrderId) return;
+
+  try {
+    await openOrderForInventoryItem(generateOrderId);
+  } catch (error) {
+    showAlert(error.message, 'error');
+  }
+});
+
+els.adjustmentRows.addEventListener('click', async (event) => {
+  const uploadId = event.target.dataset.uploadImage;
+  const editId = event.target.dataset.editImage;
+  const deleteId = event.target.dataset.deleteImage;
+  const uploadNewId = event.target.dataset.uploadNewImage;
+  const editNewId = event.target.dataset.editNewImage;
+  const deleteNewId = event.target.dataset.deleteNewImage;
+  const uploadNewDraftIdx = event.target.dataset.uploadNewDraftImage;
+
+  if (editNewId) {
+    const input = els.adjustmentRows.querySelector(`[data-new-image-file="${editNewId}"]`);
+    if (input) input.click();
+    return;
+  }
+
+  if (deleteNewId) {
+    const confirmed = window.confirm('Eliminar la imagen de esta alta nueva?');
+    if (!confirmed) return;
+
+    event.target.disabled = true;
+    event.target.textContent = 'Eliminando...';
+
+    try {
+      await deleteAdjustmentNewImage(deleteNewId);
+      await Promise.all([loadAdjustmentItems(), loadMessages()]);
+      showAlert('Imagen eliminada');
+    } catch (error) {
+      showAlert(error.message, 'error');
+    } finally {
+      event.target.disabled = false;
+      event.target.textContent = 'Eliminar';
+    }
+    return;
+  }
+
+  if (uploadNewId) {
+    const input = els.adjustmentRows.querySelector(`[data-new-image-file="${uploadNewId}"]`);
+    const file = input?.files?.[0];
+
+    event.target.disabled = true;
+    event.target.textContent = 'Cargando...';
+
+    try {
+      await handleAdjustmentNewImageUpload(uploadNewId, file, event.target);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    } finally {
+      event.target.disabled = false;
+      event.target.textContent = 'Subir / cargar';
+    }
+    return;
+  }
+
+  if (uploadNewDraftIdx !== undefined) {
+    const input = els.adjustmentRows.querySelector(`[data-new-draft-image-file="${uploadNewDraftIdx}"]`);
+    const file = input?.files?.[0];
+    if (!file) {
+      showAlert('Selecciona una imagen para cargar', 'error');
+      return;
+    }
+
+    event.target.disabled = true;
+    event.target.textContent = 'Cargando...';
+
+    try {
+      const idNuevo = await persistAdjustmentNewRowForImage(Number(uploadNewDraftIdx));
+      await handleAdjustmentNewImageUpload(idNuevo, file, event.target);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    } finally {
+      event.target.disabled = false;
+      event.target.textContent = 'Subir / cargar';
+    }
+    return;
+  }
+
+  if (editId) {
+    const input = els.adjustmentRows.querySelector(`[data-image-file="${editId}"]`);
+    if (input) input.click();
+    return;
+  }
+
+  if (deleteId) {
+    const confirmed = window.confirm('Eliminar la imagen de esta refaccion?');
+    if (!confirmed) return;
+
+    event.target.disabled = true;
+    event.target.textContent = 'Eliminando...';
+
+    try {
+      await deleteInventoryImage(deleteId);
+      await Promise.all([loadInventory(), loadAdjustmentItems(), loadPendingInventory(), loadMessages()]);
+      showAlert('Imagen eliminada');
+    } catch (error) {
+      showAlert(error.message, 'error');
+    } finally {
+      event.target.disabled = false;
+      event.target.textContent = 'Eliminar';
+    }
+    return;
+  }
+
+  if (!uploadId) return;
+
+  const input = els.adjustmentRows.querySelector(`[data-image-file="${uploadId}"]`);
+  const file = input?.files?.[0];
+
+  event.target.disabled = true;
+  event.target.textContent = 'Cargando...';
+
+  try {
+    await handleAdjustmentImageUpload(uploadId, file, event.target);
+  } catch (error) {
+    showAlert(error.message, 'error');
+  } finally {
+    event.target.disabled = false;
+    event.target.textContent = 'Subir / cargar';
+  }
+});
+
+els.adjustmentRows.addEventListener('change', async (event) => {
+  if (event.target.matches('[data-new-auto-upload="1"]')) {
+    const uploadId = event.target.dataset.newImageFile;
+    const file = event.target.files?.[0];
+    if (!uploadId || !file) return;
+
+    try {
+      await handleAdjustmentNewImageUpload(uploadId, file, event.target);
+    } catch (error) {
+      showAlert(error.message, 'error');
+    }
+    return;
+  }
+
+  if (!event.target.matches('[data-auto-upload="1"]')) return;
+
+  const uploadId = event.target.dataset.imageFile;
+  const file = event.target.files?.[0];
+  if (!uploadId || !file) return;
+
+  try {
+    await handleAdjustmentImageUpload(uploadId, file, event.target);
+  } catch (error) {
+    showAlert(error.message, 'error');
+  }
+});
+
 document.querySelector('#addDetail').addEventListener('click', addDetailRow);
 
 els.showInventoryForm.addEventListener('click', () => {
@@ -1408,13 +1774,16 @@ els.orderForm.addEventListener('submit', async (event) => {
 
   try {
     const form = readForm(els.orderForm);
-    const detalles = [...els.detailRows.querySelectorAll('.detail-row')].map((row) => ({
-      id_refaccion: Number(row.querySelector('[name="id_refaccion"]').value),
-      cantidad: Number(row.querySelector('[name="cantidad"]').value)
-    }));
+    removeBlankDetailRows();
+    const detalles = [...els.detailRows.querySelectorAll('.detail-row')]
+      .filter((row) => row.querySelector('[name="id_refaccion"]').value)
+      .map((row) => ({
+        id_refaccion: Number(row.querySelector('[name="id_refaccion"]').value),
+        cantidad: Number(row.querySelector('[name="cantidad"]').value)
+      }));
 
-    if (detalles.some((detalle) => !detalle.id_refaccion)) {
-      throw new Error('Busca y selecciona una refaccion en cada renglon');
+    if (detalles.length === 0) {
+      throw new Error('Busca y selecciona al menos una refaccion');
     }
 
     const createdOrder = await api('/api/ordenes', {

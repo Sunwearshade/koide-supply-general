@@ -1,4 +1,37 @@
+const fs = require('fs/promises');
+const path = require('path');
 const pool = require('../db/mysql');
+
+const INVENTORY_UPLOAD_DIR = path.join(__dirname, '..', 'uploads', 'inventario');
+const ALLOWED_IMAGE_TYPES = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+  ['image/gif', 'gif']
+]);
+
+function safeImageName(value, fallback) {
+  return String(value || fallback)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\.[^.]+$/, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || fallback;
+}
+
+async function tableHasColumn(tableName, columnName) {
+  const [rows] = await pool.execute(
+    `SELECT COUNT(*) AS total
+     FROM information_schema.COLUMNS
+     WHERE TABLE_SCHEMA = DATABASE()
+       AND TABLE_NAME = ?
+       AND COLUMN_NAME = ?`,
+    [tableName, columnName]
+  );
+
+  return Number(rows[0]?.total || 0) > 0;
+}
 
 async function listInventory({ q = '', page = 1, limit = 25, all = false } = {}) {
   const trimmed = q.trim();
@@ -6,7 +39,7 @@ async function listInventory({ q = '', page = 1, limit = 25, all = false } = {})
   const search = `%${trimmed}%`;
 
   if (all) {
-    let sql = `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, activo
+    let sql = `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, imagen_item, activo
        FROM inventario
        WHERE activo = 1`;
     const params = [];
@@ -37,7 +70,7 @@ async function listInventory({ q = '', page = 1, limit = 25, all = false } = {})
   }
 
   const [rows] = await pool.execute(
-    `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, activo
+    `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, imagen_item, activo
      ${baseSql}
      ORDER BY descripcion ASC
      LIMIT ${safeLimit} OFFSET ${offset}`,
@@ -63,7 +96,7 @@ async function listInventory({ q = '', page = 1, limit = 25, all = false } = {})
 
 async function getInventoryItem(idRefaccion) {
   const [rows] = await pool.execute(
-    `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, activo
+    `SELECT id_refaccion, descripcion, no_parte, ubicacion, existencias, minimos, maximos, imagen_item, activo
      FROM inventario
      WHERE id_refaccion = ?
      LIMIT 1`,
@@ -81,7 +114,7 @@ async function getInventoryItem(idRefaccion) {
 
 async function getAnyInventoryItem(idRefaccion) {
   const [rows] = await pool.execute(
-    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos,
+    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos, i.imagen_item,
             i.activo, i.estado_revision, i.id_solicitante_alta, s.nombre AS solicitante_alta,
             i.id_aprobador_alta, a.nombre AS aprobador_alta, i.fecha_revision, i.created_at
      FROM inventario i
@@ -131,21 +164,21 @@ async function createInventoryItem({ descripcion, no_parte, ubicacion, minimos =
     ]
   );
 
-  const insertedId = result.insertId;
+  if (await tableHasColumn('inventario', 'id')) {
+    await pool.execute(
+      `UPDATE inventario
+       SET id_refaccion = ?
+       WHERE id = ? AND (id_refaccion IS NULL OR id_refaccion = 0)`,
+      [result.insertId, result.insertId]
+    );
+  }
 
-  // La BD tiene 'id' como PK auto_increment y 'id_refaccion' como columna separada.
-  // Sincronizamos id_refaccion = id para que todos los lookups funcionen correctamente.
-  await pool.execute(
-    `UPDATE inventario SET id_refaccion = ? WHERE id = ? AND (id_refaccion IS NULL OR id_refaccion = 0)`,
-    [insertedId, insertedId]
-  );
-
-  return getAnyInventoryItem(insertedId);
+  return getAnyInventoryItem(result.insertId);
 }
 
 async function listPendingInventory() {
   const [rows] = await pool.execute(
-    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos,
+    `SELECT i.id_refaccion, i.descripcion, i.no_parte, i.ubicacion, i.existencias, i.minimos, i.maximos, i.imagen_item,
             i.estado_revision, i.created_at, u.nombre AS solicitante_alta
      FROM inventario i
      LEFT JOIN usuarios u ON u.id_usuario = i.id_solicitante_alta
@@ -260,6 +293,174 @@ async function deleteInventoryItem(idRefaccion) {
   return { ok: true };
 }
 
+async function uploadInventoryImage(idRefaccion, { fileName, description, mimeType, dataUrl, base64 }) {
+  const item = await getAnyInventoryItem(idRefaccion);
+
+  const type = mimeType || (dataUrl || '').match(/^data:([^;]+);base64,/)?.[1];
+  const extension = ALLOWED_IMAGE_TYPES.get(type);
+  if (!extension) {
+    const error = new Error('Solo se permiten imagenes JPG, PNG, WEBP o GIF');
+    error.status = 400;
+    throw error;
+  }
+
+  const encoded = base64 || (dataUrl || '').split(',')[1];
+  if (!encoded) {
+    const error = new Error('No se recibio la imagen');
+    error.status = 400;
+    throw error;
+  }
+
+  const buffer = Buffer.from(encoded, 'base64');
+  if (buffer.length > 8 * 1024 * 1024) {
+    const error = new Error('La imagen no debe exceder 8 MB');
+    error.status = 400;
+    throw error;
+  }
+
+  await fs.mkdir(INVENTORY_UPLOAD_DIR, { recursive: true });
+
+  const safeBaseName = safeImageName(description || item.descripcion || fileName, `refaccion-${idRefaccion}`);
+  const savedName = `${safeBaseName}.${extension}`;
+  const filePath = path.join(INVENTORY_UPLOAD_DIR, savedName);
+  const publicPath = `/uploads/inventario/${savedName}`;
+
+  await fs.writeFile(filePath, buffer);
+  await pool.execute(
+    `UPDATE inventario SET imagen_item = ? WHERE id_refaccion = ?`,
+    [publicPath, idRefaccion]
+  );
+
+  return getAnyInventoryItem(idRefaccion);
+}
+
+function parseImagePayload({ mimeType, dataUrl, base64 }) {
+  const type = mimeType || (dataUrl || '').match(/^data:([^;]+);base64,/)?.[1];
+  const extension = ALLOWED_IMAGE_TYPES.get(type);
+  if (!extension) {
+    const error = new Error('Solo se permiten imagenes JPG, PNG, WEBP o GIF');
+    error.status = 400;
+    throw error;
+  }
+
+  const encoded = base64 || (dataUrl || '').split(',')[1];
+  if (!encoded) {
+    const error = new Error('No se recibio la imagen');
+    error.status = 400;
+    throw error;
+  }
+
+  const buffer = Buffer.from(encoded, 'base64');
+  if (buffer.length > 8 * 1024 * 1024) {
+    const error = new Error('La imagen no debe exceder 8 MB');
+    error.status = 400;
+    throw error;
+  }
+
+  return { buffer, extension };
+}
+
+async function saveImageFile({ id, description, fileName, extension, buffer, prefix = 'refaccion' }) {
+  await fs.mkdir(INVENTORY_UPLOAD_DIR, { recursive: true });
+  const safeBaseName = safeImageName(description || fileName, `${prefix}-${id}`);
+  const savedName = `${safeBaseName}.${extension}`;
+  const filePath = path.join(INVENTORY_UPLOAD_DIR, savedName);
+  const publicPath = `/uploads/inventario/${savedName}`;
+  await fs.writeFile(filePath, buffer);
+  return publicPath;
+}
+
+async function deleteInventoryImage(idRefaccion) {
+  const item = await getAnyInventoryItem(idRefaccion);
+
+  if (item.imagen_item && item.imagen_item.startsWith('/uploads/inventario/')) {
+    const fileName = path.basename(item.imagen_item);
+    const filePath = path.join(INVENTORY_UPLOAD_DIR, fileName);
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  await pool.execute(
+    `UPDATE inventario SET imagen_item = NULL WHERE id_refaccion = ?`,
+    [idRefaccion]
+  );
+
+  return getAnyInventoryItem(idRefaccion);
+}
+
+async function getAdjustmentNewItem(idNuevo) {
+  const [rows] = await pool.execute(
+    `SELECT id_nuevo, descripcion, no_parte, ubicacion, existencias, minimos, maximos, imagen_item, id_usuario
+     FROM ajuste_inventario_nuevos
+     WHERE id_nuevo = ?
+     LIMIT 1`,
+    [idNuevo]
+  );
+
+  if (!rows[0]) {
+    const error = new Error('Alta nueva no encontrada');
+    error.status = 404;
+    throw error;
+  }
+
+  return rows[0];
+}
+
+async function uploadAdjustmentNewItemImage(idNuevo, { fileName, description, mimeType, dataUrl, base64 }, actor) {
+  const item = await getAdjustmentNewItem(idNuevo);
+  if (actor && item.id_usuario !== actor.id_usuario) {
+    const error = new Error('No puedes modificar esta alta nueva');
+    error.status = 403;
+    throw error;
+  }
+
+  const { buffer, extension } = parseImagePayload({ mimeType, dataUrl, base64 });
+  const publicPath = await saveImageFile({
+    id: idNuevo,
+    description: description || item.descripcion,
+    fileName,
+    extension,
+    buffer,
+    prefix: 'alta'
+  });
+
+  await pool.execute(
+    `UPDATE ajuste_inventario_nuevos SET imagen_item = ? WHERE id_nuevo = ?`,
+    [publicPath, idNuevo]
+  );
+
+  return getAdjustmentNewItem(idNuevo);
+}
+
+async function deleteAdjustmentNewItemImage(idNuevo, actor) {
+  const item = await getAdjustmentNewItem(idNuevo);
+  if (actor && item.id_usuario !== actor.id_usuario) {
+    const error = new Error('No puedes modificar esta alta nueva');
+    error.status = 403;
+    throw error;
+  }
+
+  if (item.imagen_item && item.imagen_item.startsWith('/uploads/inventario/')) {
+    const fileName = path.basename(item.imagen_item);
+    const filePath = path.join(INVENTORY_UPLOAD_DIR, fileName);
+    try {
+      await fs.unlink(filePath);
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+
+  await pool.execute(
+    `UPDATE ajuste_inventario_nuevos SET imagen_item = NULL WHERE id_nuevo = ?`,
+    [idNuevo]
+  );
+
+  return getAdjustmentNewItem(idNuevo);
+}
+
 const ADJUSTABLE_FIELDS = ['existencias', 'descripcion', 'no_parte', 'ubicacion', 'minimos', 'maximos'];
 
 async function saveAdjustmentDraft(items, actor) {
@@ -359,27 +560,57 @@ async function saveAdjustmentNewItems(items, actor) {
     throw error;
   }
 
-  // Reemplaza todos los nuevos del usuario con la lista actual
   const connection = await pool.getConnection();
   try {
     await connection.beginTransaction();
-    await connection.execute(`DELETE FROM ajuste_inventario_nuevos WHERE id_usuario = ?`, [actor.id_usuario]);
+    const submittedIds = items
+      .map((item) => Number(item.id_nuevo))
+      .filter((id) => Number.isInteger(id) && id > 0);
+
+    if (submittedIds.length > 0) {
+      await connection.query(
+        `DELETE FROM ajuste_inventario_nuevos
+         WHERE id_usuario = ? AND id_nuevo NOT IN (${submittedIds.map(() => '?').join(',')})`,
+        [actor.id_usuario, ...submittedIds]
+      );
+    } else {
+      await connection.execute(`DELETE FROM ajuste_inventario_nuevos WHERE id_usuario = ?`, [actor.id_usuario]);
+    }
 
     for (const item of items) {
       if (!item.descripcion || !item.descripcion.trim()) continue;
-      await connection.execute(
-        `INSERT INTO ajuste_inventario_nuevos (descripcion, no_parte, ubicacion, existencias, minimos, maximos, id_usuario)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [
-          item.descripcion.trim(),
-          item.no_parte || null,
-          item.ubicacion || null,
-          Number(item.existencias) || 0,
-          Number(item.minimos) || 0,
-          Number(item.maximos) || 0,
-          actor.id_usuario
-        ]
-      );
+
+      if (item.id_nuevo) {
+        await connection.execute(
+          `UPDATE ajuste_inventario_nuevos
+           SET descripcion = ?, no_parte = ?, ubicacion = ?, existencias = ?, minimos = ?, maximos = ?
+           WHERE id_nuevo = ? AND id_usuario = ?`,
+          [
+            item.descripcion.trim(),
+            item.no_parte || null,
+            item.ubicacion || null,
+            Number(item.existencias) || 0,
+            Number(item.minimos) || 0,
+            Number(item.maximos) || 0,
+            Number(item.id_nuevo),
+            actor.id_usuario
+          ]
+        );
+      } else {
+        await connection.execute(
+          `INSERT INTO ajuste_inventario_nuevos (descripcion, no_parte, ubicacion, existencias, minimos, maximos, id_usuario)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [
+            item.descripcion.trim(),
+            item.no_parte || null,
+            item.ubicacion || null,
+            Number(item.existencias) || 0,
+            Number(item.minimos) || 0,
+            Number(item.maximos) || 0,
+            actor.id_usuario
+          ]
+        );
+      }
     }
 
     await connection.commit();
@@ -394,7 +625,7 @@ async function saveAdjustmentNewItems(items, actor) {
 
 async function getAdjustmentNewItems() {
   const [rows] = await pool.execute(
-    `SELECT n.id_nuevo, n.descripcion, n.no_parte, n.ubicacion, n.existencias, n.minimos, n.maximos,
+    `SELECT n.id_nuevo, n.descripcion, n.no_parte, n.ubicacion, n.existencias, n.minimos, n.maximos, n.imagen_item,
             n.id_usuario, u.nombre AS agregado_por, n.fecha
      FROM ajuste_inventario_nuevos n
      LEFT JOIN usuarios u ON u.id_usuario = n.id_usuario
@@ -485,14 +716,23 @@ async function approveAdjustmentDraft(actor) {
     // 3. Crear nuevos items
     for (const item of newItems) {
       const [result] = await connection.execute(
-        `INSERT INTO inventario (descripcion, no_parte, ubicacion, existencias, minimos, maximos, activo, estado_revision, id_aprobador_alta, fecha_revision)
-         VALUES (?, ?, ?, ?, ?, ?, 1, 'aprobado', ?, NOW())`,
+        `INSERT INTO inventario (descripcion, no_parte, ubicacion, existencias, minimos, maximos, imagen_item, activo, estado_revision, id_aprobador_alta, fecha_revision)
+         VALUES (?, ?, ?, ?, ?, ?, ?, 1, 'aprobado', ?, NOW())`,
         [
           item.descripcion, item.no_parte || null, item.ubicacion || null,
           item.existencias || 0, item.minimos || 0, item.maximos || 0,
+          item.imagen_item || null,
           actor.id_usuario
         ]
       );
+      if (await tableHasColumn('inventario', 'id')) {
+        await connection.execute(
+          `UPDATE inventario
+           SET id_refaccion = ?
+           WHERE id = ? AND (id_refaccion IS NULL OR id_refaccion = 0)`,
+          [result.insertId, result.insertId]
+        );
+      }
       await connection.execute(
         `INSERT INTO log_ajuste_inventario (id_item, campo_modificado, valor_anterior, valor_nuevo, id_usuario)
          VALUES (?, 'alta_ajuste', NULL, ?, ?)`,
@@ -611,6 +851,10 @@ module.exports = {
   rejectInventoryItem,
   updateInventoryItem,
   deleteInventoryItem,
+  uploadInventoryImage,
+  deleteInventoryImage,
+  uploadAdjustmentNewItemImage,
+  deleteAdjustmentNewItemImage,
   saveAdjustmentDraft,
   getAdjustmentDraft,
   saveAdjustmentNewItems,
